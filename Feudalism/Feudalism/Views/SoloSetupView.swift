@@ -1,18 +1,6 @@
-//
-//  SoloSetupView.swift
-//  Feudalism
-//
-//  Solo: gore odabir veličine; sredina crni prikaz mape; dolje resursi (veće ikone, bez okvira) + Nazad | Počni.
-//
-
 import SwiftUI
+import UniformTypeIdentifiers
 
-private let soloSetupCornerRadius: CGFloat = 20
-private let stepperButtonSize: CGFloat = 40
-private let resourceStep: Int = 25
-private let resourceMax: Int = 9999
-
-/// Tip solo mape: bundle level ili proceduralna.
 enum SoloMapType: String, CaseIterable, Identifiable {
     case level = "Level (bundle)"
     case procedural = "Proceduralna"
@@ -25,26 +13,33 @@ enum SoloMapType: String, CaseIterable, Identifiable {
     }
 }
 
-/// Odabrani panel u donjem dijelu: Mapa, Resursi ili Pravila (Nazad/Pokreni su akcije).
-private enum SoloSetupSection: String, CaseIterable {
-    case map = "Mapa"
-    case resources = "Resursi"
-    case rules = "Pravila"
+private enum SoloMapChoice: Hashable {
+    case empty(Int)
+    case catalog(String)
 }
 
-/// Shape: Capsule ili Circle da kompajler ne zapne na ternaru.
-private struct CapsuleOrCircleShape: Shape {
-    var useCapsule: Bool
-    func path(in rect: CGRect) -> Path {
-        useCapsule ? Capsule().path(in: rect) : Circle().path(in: rect)
-    }
+private enum SoloSetupPage {
+    case maps
+    case resources
 }
+
+private let stepperButtonSize: CGFloat = 40
+private let resourceStep: Int = 25
+private let resourceMax: Int = 9999
 
 struct SoloSetupView: View {
     @EnvironmentObject private var gameState: GameState
     @Binding var isPresented: Bool
-    @State private var selectedMapSize: MapSizePreset = .size200
-    @State private var selectedMapType: SoloMapType = .level
+    @Binding var showResources: Bool
+    var importTick: Int = 0
+    @State private var selected: SoloMapChoice?
+    @State private var catalogRevision = 0
+    @State private var page: SoloSetupPage = .maps
+    @State private var loadProgress: Double = 0
+    @State private var preparedMap: GameMap?
+    @State private var preparedFromFile = false
+    @State private var preparedUnderground: [Placement] = []
+    @State private var loadToken = UUID()
     @State private var initialGold: Int = 0
     @State private var initialWood: Int = 0
     @State private var initialIron: Int = 0
@@ -75,293 +70,280 @@ struct SoloSetupView: View {
     @State private var initialCrossbow: Int = 0
     @State private var initialMace: Int = 0
     @State private var initialBowAndSparrow: Int = 0
-    @State private var selectedSection: SoloSetupSection = .map
-    /// Indeks odabrane mape u listi za trenutnu veličinu (0-based). Koristi se kad u folderu ima mapa.
-    @State private var selectedMapIndex: Int = 0
-    // Opcije generiranja (kad je Generiraj odabrano)
-    @State private var randomVegetacija: Bool = true
-    @State private var randomRadnaPozicija: Bool = true
-    @State private var randomRijeke: Bool = true
-    @State private var randomOscilacijeTerena: Bool = true
-    @State private var randomZemlje: Bool = true
+
+    private let cardSide: CGFloat = 96
+
+    private var canStart: Bool { preparedMap != nil && loadProgress >= 0.999 }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if selectedSection == .resources {
-                sectionContent
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                Spacer(minLength: 0)
-            } else {
-                Spacer(minLength: 0)
-                sectionContent
+        VStack(spacing: 12) {
+            Group {
+                if page == .maps {
+                    HStack(alignment: .top, spacing: 10) {
+                        ForEach(MapSizePreset.allCases) { preset in
+                            sizeColumn(preset)
+                        }
+                    }
+                } else {
+                    resourcesSection
+                }
             }
-            soloSetupBottomBar
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            bottomBar
         }
+        .padding(.horizontal, 22)
+        .padding(.top, 16)
+        .padding(.bottom, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .ignoresSafeArea(edges: .bottom)
-        .onAppear { loadDefaultsFromFile() }
+        .onAppear {
+            loadDefaultsFromFile()
+            page = showResources ? .resources : .maps
+        }
+        .onDisappear { loadToken = UUID() }
+        .onChange(of: showResources) { open in
+            page = open ? .resources : .maps
+        }
+        .onChange(of: importTick) { tick in
+            if tick > 0 { importMap() }
+        }
     }
 
-    /// Sadržaj ovisno o odabiru: Mapa, Resursi ili Pravila.
-    private var sectionContent: some View {
-        Group {
-            switch selectedSection {
-            case .map:
-                SoloMapChoiceView(
-                    selectedMapSize: $selectedMapSize,
-                    selectedMapIndex: $selectedMapIndex,
-                    selectedMapType: $selectedMapType,
-                    randomVegetacija: $randomVegetacija,
-                    randomRadnaPozicija: $randomRadnaPozicija,
-                    randomRijeke: $randomRijeke,
-                    randomOscilacijeTerena: $randomOscilacijeTerena,
-                    randomZemlje: $randomZemlje
-                )
-                .environmentObject(gameState)
-            case .resources:
-                resourcesSection
-            case .rules:
-                rulesSection
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .animation(.easeInOut(duration: 0.2), value: selectedSection)
-    }
-
-    /// Donji bar: Nazad | Mapa | Resursi | Pravila | [Nazad/Naprijed ili Kreiraj] | 2,4,6,8,10 | Pokreni. Cijelo vrijeme pri dnu.
-    private var soloSetupBottomBar: some View {
-        HStack(spacing: 0) {
+    private var bottomBar: some View {
+        HStack(spacing: 16) {
             Spacer(minLength: 0)
-            HStack(alignment: .center, spacing: 16) {
-                nazadButton
-                sectionButtonsGroup
-                mapNavOrCreateView
-                mapSizeChoiceView
-                pokreniButton
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
-            .background(Color.white.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: soloSetupCornerRadius, style: .continuous))
+            nazadButton
+            pokreniButton
             Spacer(minLength: 0)
         }
-        .padding(.bottom, 10)
     }
 
     private var nazadButton: some View {
-        Button { isPresented = false } label: {
-            Label("Nazad", systemImage: "chevron.backward")
+        Button {
+            withAnimation(.easeInOut(duration: 0.28)) { isPresented = false }
+        } label: {
+            Label(L("menu_back"), systemImage: "chevron.backward")
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(.white)
-                .frame(minWidth: 88, minHeight: 44)
-                .background(Color.black)
-                .clipShape(RoundedRectangle(cornerRadius: soloSetupCornerRadius, style: .continuous))
+                .frame(minWidth: 100, minHeight: 44)
+                .background(Color.black.opacity(0.55))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("solo_nazad")
     }
 
-    /// Mapa | Resursi | Pravila: obli kvadrati unutar jednog oblog kvadrata.
-    private static let sectionInnerSpacing: CGFloat = 6
-    private static let sectionInnerCorner: CGFloat = 12
-
-    private var sectionButtonsGroup: some View {
-        HStack(spacing: Self.sectionInnerSpacing) {
-            sectionButton(.map, label: "Mapa")
-            sectionButton(.resources, label: "Resursi")
-            sectionButton(.rules, label: "Pravila")
-        }
-        .padding(Self.sectionInnerSpacing)
-        .background(Color.white.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: soloSetupCornerRadius, style: .continuous))
-    }
-
-    private func sectionButton(_ section: SoloSetupSection, label: String) -> some View {
-        Button { selectedSection = section } label: {
-            Text(label)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(selectedSection == section ? .white : .white.opacity(0.8))
-                .frame(minWidth: 88, minHeight: 44)
-                .background(selectedSection == section ? Color.green.opacity(0.9) : Color.white.opacity(0.06))
-                .clipShape(RoundedRectangle(cornerRadius: Self.sectionInnerCorner, style: .continuous))
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// Kad Map: jedan element – Kreiraj ili Nazad/Naprijed. Kad Resursi: 3 gumba. Kad Pravila: prazno.
-    private static let mapNavBoxWidth: CGFloat = 120
-    private static let mapNavBoxHeight: CGFloat = 44
-    private static let mapNavContentAnimation: Animation = .easeInOut(duration: 0.32)
-    private static let resourcesSlotSpacing: CGFloat = 6
-    private static let resourcesSlotCorner: CGFloat = 12
-    private static let resourcesThreeButtonsWidth: CGFloat = 156
-
-    private var middleSectionWidth: CGFloat {
-        switch selectedSection {
-        case .map: return Self.mapNavBoxWidth
-        case .resources: return Self.resourcesThreeButtonsWidth
-        case .rules: return 0
-        }
-    }
-
-    private var mapNavOrCreateView: some View {
-        Group {
-            if selectedSection == .map {
-                ZStack {
-                    if mapEntriesForCurrentSize.isEmpty {
-                        Button {
-                            let radniNaziv = "Mapa_\(selectedMapSize.side)x\(selectedMapSize.side)"
-                            gameState.createMapAndOpenEditor(name: radniNaziv, side: selectedMapSize.side) { success in
-                                if success { isPresented = false }
-                            }
-                        } label: {
-                            Text("Kreiraj mapu")
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundStyle(.white)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .background(Color.green.opacity(0.85))
-                                .clipShape(RoundedRectangle(cornerRadius: soloSetupCornerRadius, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                        .help("Nema spremljenih mapa. Kreira se mapa s radnim nazivom; pričekaj da se sve učita, pa uredi u Map Editoru.")
-                        .transition(.opacity)
-                    }
-                    if !mapEntriesForCurrentSize.isEmpty {
-                        HStack(spacing: 0) {
-                            Button {
-                                withAnimation(.easeInOut(duration: 0.34)) {
-                                    selectedMapIndex = (selectedMapIndex - 1 + mapEntriesForCurrentSize.count) % mapEntriesForCurrentSize.count
-                                }
-                            } label: {
-                                Image(systemName: "chevron.left")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.9))
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            }
-                            .buttonStyle(.plain)
-                            Button {
-                                withAnimation(.easeInOut(duration: 0.34)) {
-                                    selectedMapIndex = (selectedMapIndex + 1) % mapEntriesForCurrentSize.count
-                                }
-                            } label: {
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.9))
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .background(Color.white.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: soloSetupCornerRadius, style: .continuous))
-                        .transition(.opacity)
+    private func sizeColumn(_ preset: MapSizePreset) -> some View {
+        VStack(alignment: .center, spacing: 8) {
+            Text("\(preset.side)x\(preset.side)")
+                .font(.custom("Georgia", size: 17))
+                .fontWeight(.semibold)
+                .foregroundStyle(.white.opacity(0.95))
+                .frame(maxWidth: .infinity)
+            ScrollView {
+                VStack(spacing: 10) {
+                    mapCard(
+                        title: L("solo_empty_map"),
+                        choice: .empty(preset.side),
+                        accessibilityId: "solo_empty_map_\(preset.side)"
+                    )
+                    ForEach(MapCatalog.entries(forSide: preset.side)) { entry in
+                        mapCard(
+                            title: entry.displayName,
+                            choice: .catalog(entry.path),
+                            accessibilityId: "solo_map_\(entry.path)"
+                        )
                     }
                 }
-                .frame(width: Self.mapNavBoxWidth, height: Self.mapNavBoxHeight)
-                .animation(Self.mapNavContentAnimation, value: mapEntriesForCurrentSize.isEmpty)
-            } else if selectedSection == .resources {
-                resourcesThreeButtonsView
-            } else {
-                Color.clear
-                    .frame(width: 0, height: Self.mapNavBoxHeight)
+                .frame(maxWidth: .infinity)
             }
         }
-        .frame(width: middleSectionWidth, height: Self.mapNavBoxHeight)
-        .clipped()
-        .animation(.easeInOut(duration: 0.3), value: selectedSection)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .id(catalogRevision)
     }
 
-    /// Kad je Resursi odabran: 3 gumba u jednom elementu (placeholderi za sada).
-    private var resourcesThreeButtonsView: some View {
-        HStack(spacing: Self.resourcesSlotSpacing) {
-            ForEach(0..<3, id: \.self) { _ in
-                Color.white.opacity(0.06)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: Self.resourcesSlotCorner, style: .continuous))
-            }
-        }
-        .padding(Self.resourcesSlotSpacing)
-        .background(Color.white.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: soloSetupCornerRadius, style: .continuous))
-        .frame(width: Self.resourcesThreeButtonsWidth, height: Self.mapNavBoxHeight)
-    }
-
-    private var mapEntriesForCurrentSize: [MapCatalogEntry] {
-        MapCatalog.entries(forSide: selectedMapSize.side)
-    }
-
-    private var mapSizeChoiceView: some View {
-        HStack(spacing: 8) {
-            ForEach(MapSizePreset.allCases) { preset in
-                mapSizeButton(preset: preset)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.white.opacity(0.06))
-        .clipShape(Capsule())
-    }
-
-    private func mapSizeButton(preset: MapSizePreset) -> some View {
-        let isSelected = selectedMapSize == preset
+    private func mapCard(title: String, choice: SoloMapChoice, accessibilityId: String) -> some View {
+        let isOn = selected == choice
         return Button {
-            selectedMapSize = preset
-            let entries = MapCatalog.entries(forSide: preset.side)
-            selectedMapIndex = min(selectedMapIndex, max(0, entries.count - 1))
+            selectAndLoad(choice)
         } label: {
-            mapSizeButtonLabel(text: "\(preset.side / 100)", isSelected: isSelected)
+            VStack(spacing: 6) {
+                EmptyMapThumbnail()
+                    .frame(width: cardSide, height: cardSide)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(isOn ? Color.green : Color.white.opacity(0.22), lineWidth: isOn ? 3 : 1)
+                    )
+                Text(title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.8))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .frame(width: cardSide)
+            }
         }
         .buttonStyle(.plain)
-    }
-
-    private func mapSizeButtonLabel(text: String, isSelected: Bool) -> some View {
-        Text(text)
-            .font(.system(size: 14, weight: .medium))
-            .foregroundStyle(.white.opacity(0.95))
-            .frame(width: 40, height: 40)
-            .background(isSelected ? Color.white.opacity(0.22) : Color.white.opacity(0.08))
-            .clipShape(CapsuleOrCircleShape(useCapsule: isSelected))
+        .accessibilityIdentifier(accessibilityId)
+        .help(title)
     }
 
     private var pokreniButton: some View {
-        let hasMaps = !mapEntriesForCurrentSize.isEmpty
-        return Button {
-            guard hasMaps else { return }
-            AudioManager.shared.stopIntroSoundtrack()
-            let mapsForSize = MapCatalog.entries(forSide: selectedMapSize.side)
-            let entry = mapsForSize[min(selectedMapIndex, mapsForSize.count - 1)]
-            gameState.startSoloWithMapEntry(
-                entry: entry,
-                initialGold: initialGold,
-                initialWood: initialWood,
-                initialIron: initialIron,
-                initialStone: initialStone,
-                initialFood: initialFood,
-                initialHop: initialHop,
-                initialHay: initialHay
-            )
-            isPresented = false
-        } label: {
-            HStack(spacing: 8) {
-                Text("Pokreni")
-                Image(systemName: "play.fill")
-                    .font(.system(size: 15, weight: .semibold))
+        Button(action: startSelected) {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.gray.opacity(0.55))
+                    Capsule()
+                        .fill(Color.green)
+                        .frame(width: geo.size.width * loadProgress)
+                    Text(canStart ? "Pokreni" : "\(Int((loadProgress * 100).rounded()))%")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
-            .font(.system(size: 16, weight: .semibold))
-            .foregroundStyle(hasMaps ? .white : .white.opacity(0.5))
-            .frame(minWidth: 102, minHeight: 48)
-            .background(hasMaps ? Color.green : Color.green.opacity(0.4))
-            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .frame(width: 168, height: 44)
         }
         .buttonStyle(.plain)
-        .disabled(!hasMaps)
-        .help(hasMaps ? "Pokreni solo igru s odabranom mapom." : "Prvo kreiraj mapu (gumb „Kreiraj mapu” u odabiru veličine).")
+        .disabled(!canStart)
+        .opacity(canStart ? 1 : 0.95)
+        .accessibilityIdentifier("solo_pokreni")
     }
 
-    // MARK: - Resursi: tablica (grid) – 24 ostalih, zadnji red samo oružje (6)
+    private func selectAndLoad(_ choice: SoloMapChoice) {
+        selected = choice
+        preparedMap = nil
+        preparedUnderground = []
+        preparedFromFile = false
+        loadProgress = 0
+        let token = UUID()
+        loadToken = token
+        Task { await loadChoice(choice, token: token) }
+    }
+
+    private func loadChoice(_ choice: SoloMapChoice, token: UUID) async {
+        switch choice {
+        case .empty(let side):
+            let map = await buildEmptyMap(side: side, token: token)
+            await finishLoad(map: map, fromFile: false, underground: [], token: token)
+        case .catalog(let path):
+            let loaded = await loadCatalogMap(path: path, token: token)
+            await finishLoad(map: loaded?.map, fromFile: true, underground: loaded?.underground ?? [], token: token)
+        }
+    }
+
+    private func finishLoad(map: GameMap?, fromFile: Bool, underground: [Placement], token: UUID) async {
+        guard loadToken == token else { return }
+        if let map {
+            preparedMap = map
+            preparedFromFile = fromFile
+            preparedUnderground = underground
+            withAnimation(.easeOut(duration: 0.18)) { loadProgress = 1 }
+        } else {
+            preparedMap = nil
+            loadProgress = 0
+        }
+    }
+
+    private func buildEmptyMap(side: Int, token: UUID) async -> GameMap? {
+        let rows = side
+        let cols = side
+        return await Task.detached(priority: .userInitiated) {
+            var cells: [String: MapCell] = [:]
+            cells.reserveCapacity(rows * cols)
+            let step = max(1, rows / 20)
+            for r in 0..<rows {
+                if Task.isCancelled { return nil }
+                for c in 0..<cols {
+                    let coord = MapCoordinate(row: r, col: c)
+                    cells[coord.cellId] = MapCell(coordinate: coord, povrsina: .default)
+                }
+                if r % step == 0 {
+                    let p = Double(r + 1) / Double(rows) * 0.9
+                    await reportProgress(p, token: token)
+                }
+            }
+            let heights = GameMap.makeInitialVertexHeights(rows: rows, cols: cols)
+            await reportProgress(0.97, token: token)
+            return GameMap(rows: rows, cols: cols, cells: cells, vertexHeights: heights)
+        }.value
+    }
+
+    private func loadCatalogMap(path: String, token: UUID) async -> (map: GameMap, underground: [Placement])? {
+        await reportProgress(0.08, token: token)
+        guard let root = MapStorage.mapsRoot() else { return nil }
+        let url = root.appendingPathComponent(path)
+        return await Task.detached(priority: .userInitiated) {
+            await reportProgress(0.2, token: token)
+            guard let data = MapFileManager.load(from: url) else { return nil }
+            await reportProgress(0.55, token: token)
+            let cells = data.cells ?? GameMap.makeGrid(rows: data.rows, cols: data.cols)
+            let heights: [String: CGFloat]
+            if let vh = data.vertexHeights {
+                heights = Dictionary(uniqueKeysWithValues: vh.map { ($0.key, CGFloat($0.value)) })
+            } else {
+                heights = GameMap.makeInitialVertexHeights(rows: data.rows, cols: data.cols)
+            }
+            await reportProgress(0.88, token: token)
+            let map = GameMap(rows: data.rows, cols: data.cols, cells: cells, vertexHeights: heights)
+            map.replacePlacements(data.placements)
+            map.replaceVertexOffsets(data.vertexOffsetPoints)
+            map.replaceLordStarts(data.lordStartSlots)
+            map.originOffsetX = CGFloat(data.originOffsetX ?? 0)
+            map.originOffsetZ = CGFloat(data.originOffsetZ ?? 0)
+            return (map, data.undergroundPlacements ?? [])
+        }.value
+    }
+
+    private func reportProgress(_ value: Double, token: UUID) async {
+        await MainActor.run {
+            guard loadToken == token else { return }
+            loadProgress = min(0.99, max(loadProgress, value))
+        }
+    }
+
+    private func startSelected() {
+        guard canStart, let map = preparedMap else { return }
+        AudioManager.shared.stopIntroSoundtrack()
+        gameState.startSandboxWithPreparedMap(
+            map: map,
+            loadedFromFile: preparedFromFile,
+            undergroundPlacements: preparedUnderground,
+            initialGold: initialGold,
+            initialWood: initialWood,
+            initialIron: initialIron,
+            initialStone: initialStone,
+            initialFood: initialFood,
+            initialHop: initialHop,
+            initialHay: initialHay
+        )
+        applyExtraStartingGoods()
+        isPresented = false
+    }
+
+    private func applyExtraStartingGoods() {
+        gameState.addGood(.beer, initialBeer)
+        gameState.addGood(.corn, initialCorn)
+        gameState.addGood(.eggs, initialEggs)
+        gameState.addGood(.grapes, initialGrapes)
+        gameState.addGood(.meat, initialMeat)
+        gameState.addGood(.cheese, initialCheese)
+        gameState.addGood(.apple, initialApple)
+        gameState.addGood(.candle, initialCandle)
+        gameState.addGood(.flowers, initialFlowers)
+        gameState.addGood(.leather, initialLeather)
+        gameState.addGood(.shield, initialShield)
+        gameState.addGood(.sausages, initialSausages)
+        gameState.addGood(.spear, initialSpear)
+        gameState.addGood(.spices, initialSpices)
+        gameState.addGood(.sword, initialSword)
+        gameState.addGood(.vegetables, initialVegetables)
+        gameState.addGood(.wine, initialVine)
+        gameState.addGood(.bow, initialBowAndSparrow)
+    }
+
     private static let resourceGridColumns = 6
     private var resourceItems: [(iconName: String, value: Binding<Int>, fallback: String)] {
         [
-            // Redovi 1–4: ostali resursi (24)
             ("gold", $initialGold, "dollarsign.circle.fill"),
             ("wood_resource", $initialWood, "leaf.fill"),
             ("iron_resource", $initialIron, "cylinder.fill"),
@@ -380,48 +362,33 @@ struct SoloSetupView: View {
             ("banana_resource", $initialBanana, "leaf.fill"),
             ("vegetables_resource", $initialVegetables, "carrot.fill"),
             ("spices_resources", $initialSpices, "leaf.fill"),
-            ("candle_resource", $initialCandle, "flame.fill"), // na mjestu soli (sol maknuta)
+            ("candle_resource", $initialCandle, "flame.fill"),
             ("vine_resources", $initialVine, "drop.fill"),
             ("sosages_resouce", $initialSausages, "fork.knife"),
             ("leather_resources", $initialLeather, "square.fill"),
             ("flowers_resoiurce", $initialFlowers, "camera.macro"),
             ("medicine_reousrce", $initialMedicine, "cross.case.fill"),
-            // Zadnji red: samo oružje (6) – gumbi + brojevi
             ("shield_resource", $initialShield, "shield.fill"),
             ("spear_resource", $initialSpear, "line.diagonal"),
             ("sword_resource", $initialSword, "line.diagonal"),
             ("crosbow_resource", $initialCrossbow, "scope"),
             ("mece_resource", $initialMace, "hammer.fill"),
-            ("bow_and_sparrow_resouce", $initialBowAndSparrow, "arrow.up"), // bowl and sparrow
+            ("bow_and_sparrow_resouce", $initialBowAndSparrow, "arrow.up"),
         ]
     }
 
     private var resourcesSection: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 20), count: Self.resourceGridColumns), spacing: 20) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 20), count: Self.resourceGridColumns), spacing: 16) {
                 ForEach(Array(resourceItems.enumerated()), id: \.offset) { _, item in
-                    resourceRow(iconName: item.iconName, value: item.value, systemFallback: item.fallback, iconSize: 80, numberFontSize: 20)
+                    resourceRow(iconName: item.iconName, value: item.value, systemFallback: item.fallback)
                 }
             }
-            .padding(.horizontal, 32)
-            .padding(.top, 0)
-            .padding(.bottom, 20)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .scrollContentBackground(.hidden)
-    }
-
-    // MARK: - Pravila (placeholder)
-    private var rulesSection: some View {
-        VStack(spacing: 12) {
-            Text("Pravila")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.9))
-            Text("Pravila igre – uskoro.")
-                .font(.system(size: 14))
-                .foregroundStyle(.white.opacity(0.6))
-        }
-        .padding(.vertical, 40)
     }
 
     private func loadDefaultsFromFile() {
@@ -435,10 +402,8 @@ struct SoloSetupView: View {
         initialHay = def.hay
     }
 
-    private func resourceRow(iconName: String, value: Binding<Int>, systemFallback: String = "cube.fill", alsoTryIconNames: [String] = [], iconSize: CGFloat = 64, numberFontSize: CGFloat = 18) -> some View {
+    private func resourceRow(iconName: String, value: Binding<Int>, systemFallback: String) -> some View {
         let img = loadBarIcon(named: iconName)
-            ?? alsoTryIconNames.lazy.compactMap { loadBarIcon(named: $0) }.first
-        let btnSize: CGFloat = iconSize > 70 ? 44 : stepperButtonSize
         return VStack(spacing: 8) {
             Group {
                 if let nsImg = img {
@@ -447,47 +412,151 @@ struct SoloSetupView: View {
                         .scaledToFit()
                 } else {
                     Image(systemName: systemFallback)
-                        .font(.system(size: min(iconSize * 0.6, 48)))
+                        .font(.system(size: 48))
                         .foregroundStyle(.white.opacity(0.95))
                 }
             }
-            .frame(width: iconSize, height: iconSize)
+            .frame(width: 88, height: 88)
             HStack(spacing: 8) {
                 Button {
                     value.wrappedValue = max(0, value.wrappedValue - resourceStep)
                 } label: {
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.9))
-                        .frame(width: btnSize, height: btnSize)
+                        .frame(width: stepperButtonSize, height: stepperButtonSize)
                         .background(Color.white.opacity(0.15))
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
                 Text("\(value.wrappedValue)")
-                    .font(.system(size: numberFontSize, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 16, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.98))
-                    .frame(minWidth: 48, alignment: .center)
+                    .frame(minWidth: 40, alignment: .center)
                 Button {
                     value.wrappedValue = min(resourceMax, value.wrappedValue + resourceStep)
                 } label: {
                     Image(systemName: "chevron.up")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.9))
-                        .frame(width: btnSize, height: btnSize)
+                        .frame(width: stepperButtonSize, height: stepperButtonSize)
                         .background(Color.white.opacity(0.15))
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+
+    private func importMap() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.title = L("solo_import_map")
+        guard panel.runModal() == .OK, let url = panel.url,
+              let data = MapFileManager.load(from: url) else { return }
+        showResources = false
+        page = .maps
+        let side = MapStorage.folderSide(rows: data.rows, cols: data.cols)
+        let name = data.mapName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? url.deletingPathExtension().lastPathComponent
+            : data.mapName
+        if let path = storeImportedMap(data, from: url, side: side, name: name) {
+            catalogRevision += 1
+            selectAndLoad(.catalog(path))
+        } else {
+            loadImportedDirectly(data)
+        }
+    }
+
+    private func storeImportedMap(_ data: MapEditorSaveData, from url: URL, side: Int, name: String) -> String? {
+        let fileName = MapStorage.fileName(forMapName: name, slotFallback: .solo)
+        guard let relative = MapStorage.relativePath(side: side, fileName: fileName),
+              let destination = MapStorage.fileURL(side: side, fileName: fileName) else { return nil }
+        MapStorage.createSizeFoldersIfNeeded()
+        if destination.path != url.path {
+            if FileManager.default.fileExists(atPath: destination.path) {
+                try? FileManager.default.removeItem(at: destination)
+            }
+            do {
+                try FileManager.default.copyItem(at: url, to: destination)
+            } catch {
+                return nil
+            }
+        }
+        let category = MapSizeCategory.from(rows: data.rows, cols: data.cols)
+        MapCatalog.addOrUpdate(entry: MapCatalogEntry(
+            path: relative,
+            rows: data.rows,
+            cols: data.cols,
+            slot: MapEditorSlot.solo.rawValue,
+            displayName: name,
+            sizeCategory: category.rawValue,
+            suggestedPlayers: MapEditorSlot.solo.defaultSuggestedPlayers,
+            tags: MapEditorSlot.solo.defaultTags
+        ))
+        return relative
+    }
+
+    private func loadImportedDirectly(_ data: MapEditorSaveData) {
+        selected = nil
+        let cells = data.cells ?? GameMap.makeGrid(rows: data.rows, cols: data.cols)
+        let heights: [String: CGFloat]
+        if let stored = data.vertexHeights {
+            heights = Dictionary(uniqueKeysWithValues: stored.map { ($0.key, CGFloat($0.value)) })
+        } else {
+            heights = GameMap.makeInitialVertexHeights(rows: data.rows, cols: data.cols)
+        }
+        let map = GameMap(rows: data.rows, cols: data.cols, cells: cells, vertexHeights: heights)
+        map.replacePlacements(data.placements)
+        map.replaceVertexOffsets(data.vertexOffsetPoints)
+        map.replaceLordStarts(data.lordStartSlots)
+        map.originOffsetX = CGFloat(data.originOffsetX ?? 0)
+        map.originOffsetZ = CGFloat(data.originOffsetZ ?? 0)
+        preparedMap = map
+        preparedFromFile = true
+        preparedUnderground = data.undergroundPlacements ?? []
+        withAnimation(.easeOut(duration: 0.18)) { loadProgress = 1 }
+    }
+
+    private func L(_ key: String) -> String {
+        LocalizedStrings.string(for: key, language: gameState.appLanguage)
+    }
+}
+
+private struct EmptyMapThumbnail: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.36, green: 0.48, blue: 0.22),
+                    Color(red: 0.28, green: 0.38, blue: 0.16)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            Canvas { context, size in
+                let step = size.width / 8
+                var path = Path()
+                for i in 1..<8 {
+                    let x = step * CGFloat(i)
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: size.height))
+                    let y = step * CGFloat(i)
+                    path.move(to: CGPoint(x: 0, y: y))
+                    path.addLine(to: CGPoint(x: size.width, y: y))
+                }
+                context.stroke(path, with: .color(.white.opacity(0.12)), lineWidth: 0.8)
+            }
+        }
     }
 }
 
 #Preview {
-    SoloSetupView(isPresented: .constant(true))
+    SoloSetupView(isPresented: .constant(true), showResources: .constant(false))
         .environmentObject(GameState())
         .frame(width: 1600, height: 920)
         .background(Color.black.opacity(0.5))

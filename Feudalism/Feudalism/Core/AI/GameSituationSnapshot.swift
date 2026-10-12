@@ -46,8 +46,10 @@ struct PlacementSnapshot: Codable {
     var col: Int
     var width: Int
     var height: Int
-    /// Kad dodamo vlasništvo: koji realm posjeduje (realmId).
+    /// Frakcija koja posjeduje građevinu (RealmSeat.id).
     var realmId: String?
+    /// Sloj logičke mape: "surface" ili "underground".
+    var layer: String?
 }
 
 struct TerrainSummary: Codable {
@@ -72,7 +74,7 @@ extension GameSituationSnapshot {
                 groupId: r.groupId
             )
         }
-        let placements = gameState.gameMap.placements.map { p in
+        let placements = gameState.mapLogic.allPlacements.map { layer, p in
             PlacementSnapshot(
                 id: p.id,
                 objectId: p.objectId,
@@ -80,7 +82,8 @@ extension GameSituationSnapshot {
                 col: p.col,
                 width: p.width,
                 height: p.height,
-                realmId: nil
+                realmId: gameState.owner(of: p),
+                layer: layer.rawValue
             )
         }
         var terrainSummary: TerrainSummary?

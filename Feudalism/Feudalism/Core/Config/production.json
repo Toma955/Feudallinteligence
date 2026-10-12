@@ -1,0 +1,43 @@
+{
+  "_upute": "Proizvodnja po građevini. potezi = koliko poteza (≈ sekundi) traje jedan ciklus pri punoj brzini; godišnje doba ga ubrzava ili usporava prema vrsti (field, animal, food, resource, weapon). ulaz se uzima iz skladišta, izlaz ide u svoje skladište. Roba: stone, wood, iron, hop, beer, gold, food, wheat, flour, bread, corn, eggs, apple, spirits, wine, honey, wax, candle, vegetables, grapes, spices, flowers, meat, sausages, milk, cheese, wool, hay, sword, shield, bow, spear, leather, horse. skladista = koliko robe stane u jednu građevinu za spremanje.",
+  "gradevine": {
+    "object_farm":        { "naziv": "Farma pšenice",   "vrsta": "field",    "potezi": 20, "ulaz": {},                       "izlaz": { "wheat": 3, "hay": 1 } },
+    "object_corn":        { "naziv": "Kukuruz",         "vrsta": "field",    "potezi": 20, "ulaz": {},                       "izlaz": { "corn": 3 } },
+    "object_hop":         { "naziv": "Ječam / hmelj",   "vrsta": "field",    "potezi": 20, "ulaz": {},                       "izlaz": { "hop": 2 } },
+    "object_vegetables":  { "naziv": "Povrće",          "vrsta": "field",    "potezi": 18, "ulaz": {},                       "izlaz": { "vegetables": 3 } },
+    "object_grapes":      { "naziv": "Vinograd",        "vrsta": "field",    "potezi": 22, "ulaz": {},                       "izlaz": { "grapes": 3 } },
+    "object_spices":      { "naziv": "Začini",          "vrsta": "field",    "potezi": 24, "ulaz": {},                       "izlaz": { "spices": 2 } },
+    "object_flower":      { "naziv": "Cvijeće",         "vrsta": "field",    "potezi": 16, "ulaz": {},                       "izlaz": { "flowers": 2 } },
+    "object_apple":       { "naziv": "Voćnjak",         "vrsta": "field",    "potezi": 22, "ulaz": {},                       "izlaz": { "apple": 3 } },
+    "object_chicken":     { "naziv": "Kokošinjac",      "vrsta": "animal",   "potezi": 15, "ulaz": {},                       "izlaz": { "eggs": 2 } },
+    "object_hive":        { "naziv": "Košnica",         "vrsta": "animal",   "potezi": 20, "ulaz": {},                       "izlaz": { "honey": 2, "wax": 1 } },
+    "object_pig":         { "naziv": "Svinjac",         "vrsta": "animal",   "potezi": 22, "ulaz": {},                       "izlaz": { "meat": 2, "sausages": 1 } },
+    "object_cow":         { "naziv": "Štala krava",     "vrsta": "animal",   "potezi": 20, "ulaz": {},                       "izlaz": { "milk": 2, "cheese": 1, "leather": 1 } },
+    "object_sheep":       { "naziv": "Tor",             "vrsta": "animal",   "potezi": 18, "ulaz": {},                       "izlaz": { "wool": 2, "milk": 1 } },
+    "object_candle_shop": { "naziv": "Svijećarnica",    "vrsta": "food",     "potezi": 10, "ulaz": { "wax": 1 },             "izlaz": { "candle": 2 } },
+    "object_stable":      { "naziv": "Štala (konji)",   "vrsta": "animal",   "potezi": 40, "ulaz": {},                       "izlaz": { "horse": 1 } },
+    "object_food":        { "naziv": "Hrana",           "vrsta": "food",     "potezi": 12, "ulaz": {},                       "izlaz": { "food": 2 } },
+    "object_windmill":    { "naziv": "Mlin",            "vrsta": "food",     "potezi": 10, "ulaz": { "wheat": 2 },           "izlaz": { "flour": 2 } },
+    "object_bakery":      { "naziv": "Pekara",          "vrsta": "food",     "potezi": 12, "ulaz": { "flour": 2 },           "izlaz": { "bread": 6 } },
+    "object_granary":     { "naziv": "Žitnica",         "vrsta": "food",     "potezi": 15, "ulaz": { "wheat": 3 },           "izlaz": { "food": 3 } },
+    "object_brewery":     { "naziv": "Pivovara",        "vrsta": "food",     "potezi": 10, "ulaz": { "hop": 2 },             "izlaz": { "beer": 2 } },
+    "object_distillery":  { "naziv": "Destilerija",     "vrsta": "food",     "potezi": 20, "ulaz": { "corn": 2 },            "izlaz": { "spirits": 1 } },
+    "object_wine_cellar": { "naziv": "Vinski podrum",   "vrsta": "food",     "potezi": 30, "ulaz": { "grapes": 2 },          "izlaz": { "wine": 1 } },
+    "object_tavern":      { "naziv": "Krčma",           "vrsta": "food",     "potezi": 6,  "ulaz": { "beer": 1 },            "izlaz": { "gold": 2 } },
+    "object_canteen":     { "naziv": "Zalogajnica",     "vrsta": "food",     "potezi": 12, "ulaz": { "corn": 2, "eggs": 1 }, "izlaz": { "food": 5 } },
+    "object_iron":        { "naziv": "Rudnik željeza",  "vrsta": "resource", "potezi": 12, "ulaz": {},                       "izlaz": { "iron": 2 } },
+    "object_stone":       { "naziv": "Kamenolom",       "vrsta": "resource", "potezi": 10, "ulaz": {},                       "izlaz": { "stone": 3 } },
+    "object_wood":        { "naziv": "Sječarnica",      "vrsta": "resource", "potezi": 6,  "ulaz": {},                       "izlaz": { "wood": 3 } },
+    "object_sword":       { "naziv": "Mač",             "vrsta": "weapon",   "potezi": 20, "ulaz": { "iron": 1 },            "izlaz": { "sword": 1 } },
+    "object_shield":      { "naziv": "Štit",            "vrsta": "weapon",   "potezi": 18, "ulaz": { "wood": 2 },            "izlaz": { "shield": 1 } },
+    "object_bow":         { "naziv": "Luk",             "vrsta": "weapon",   "potezi": 15, "ulaz": { "wood": 1 },            "izlaz": { "bow": 1 } },
+    "object_spear":       { "naziv": "Koplje",          "vrsta": "weapon",   "potezi": 12, "ulaz": { "wood": 1 },            "izlaz": { "spear": 1 } },
+    "object_leather":     { "naziv": "Koža",            "vrsta": "weapon",   "potezi": 20, "ulaz": {},                       "izlaz": { "leather": 1 } }
+  },
+  "skladista": {
+    "armory": 60,
+    "pantry": 400,
+    "warehouse": 400,
+    "stable": 5
+  }
+}

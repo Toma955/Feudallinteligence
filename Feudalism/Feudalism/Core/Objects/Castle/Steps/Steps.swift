@@ -25,9 +25,9 @@ enum Steps: PlaceableSceneKitObject {
         )
     }
 
-    /// 1 ćelija = MapScale.objectCubeWorldUnits (40×40 world).
+    /// 1 ćelija = 1 metar.
     private static var baseSize: CGFloat { MapScale.objectCubeWorldUnits }
-    private static let shapeHeight: CGFloat = 400
+    private static var shapeHeight: CGFloat { MapScale.meters(ObjectDimensions.steps.heightCells) }
 
     static func loadSceneKitNode(from bundle: Bundle = .main) -> SCNNode? {
         let container = SCNNode()

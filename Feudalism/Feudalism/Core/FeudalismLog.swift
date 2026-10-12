@@ -1,6 +1,6 @@
 //
 //  FeudalismLog.swift
-//  Feudalism
+//  Feudallinteligence
 //
 //  Logovi: os_log, stdout, stderr, datoteka. Datoteka u Core/Logs/ unutar projekta (ako je dostupno), inače Application Support.
 //
@@ -9,7 +9,7 @@ import Foundation
 import os.log
 
 enum FeudalismLog {
-    private static let prefix = "[Feudalism] "
+    private static let prefix = "[Feudallinteligence] "
     private static let osLog = OSLog(subsystem: Bundle.main.bundleIdentifier ?? "Feudalism", category: "App")
     private static let logFileName = "feudalism_log.txt"
     private static let logsSubdir = "Logs"

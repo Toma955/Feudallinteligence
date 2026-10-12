@@ -1,0 +1,388 @@
+//
+//  PeopleGameState.swift
+//  Feudalism
+//
+//  Osobe u partiji: na početku seljaci stoje oko vatre ispred dvorca. Kuće dovode nove.
+//  Radno mjesto uzima seljaka (postaje radnik), Trening ga s oružjem pretvara u vojnika.
+//
+
+import Foundation
+
+extension GameState {
+    /// Dvorac bez kuća prima toliko ljudi; na početku partije dolaze jedan po jedan.
+    static let baseCapacity = 10
+    static let peoplePerHouse = 10
+    /// Najviše slobodnih seljaka uz vatru; ostali čekaju dok netko ne ode na posao.
+    static let maxAtFire = 24
+    /// Razmak između seljaka na krugu oko vatre (metri / ćelije).
+    static let firePersonSpacing = 0.95
+    /// Najmanji krug – da i prvih par ljudi ima mjesta.
+    static let fireMinSlots = 8
+    /// Jedan novi seljak svakih 30 poteza. 1 potez = 1 s, dakle dvije osobe u minuti.
+    static let immigrationEveryTicks = 30
+
+    var playerSeat: RealmSeat? {
+        realmSeats.seats.first(where: \.isPlayerFaction) ?? realmSeats.seats.first
+    }
+
+    /// Živi ljudi frakcije koji su još u dvorcu (bez onih koji odlaze).
+    func peopleOf(faction: String) -> [Person] {
+        people.people.filter { $0.factionId == faction && $0.healthPercent > 0 && $0.activity != .leaving }
+    }
+
+    // MARK: - Mjesta oko vatre i postroj
+
+    func hearthCell(of seat: RealmSeat) -> (row: Double, col: Double) {
+        let front = GatheringHearth.frontOffset(footprintMeters: MapScale.meters(ObjectDimensions.castle.cellHeight)) / MapScale.worldUnitsPerMapCell
+        return (seat.castleRow - Double(front), seat.castleCol)
+    }
+
+    /// Koliko mjesta treba oko vatre: kapacitet, ali ne više od 24 i ne manje od 8.
+    func gatheringSlots(of faction: String) -> Int {
+        min(Self.maxAtFire, max(Self.fireMinSlots, populationCapacity(of: faction)))
+    }
+
+    func gatheringRadius(of faction: String) -> Double {
+        let n = gatheringSlots(of: faction)
+        return max(1.55, Double(n) * Self.firePersonSpacing / (2 * .pi))
+    }
+
+    private func fireSlotPosition(seat: RealmSeat, slot: Int) -> (row: Double, col: Double) {
+        let perRing = gatheringSlots(of: seat.id)
+        let base = gatheringRadius(of: seat.id)
+        let ring = slot / perRing
+        let index = slot % perRing
+        let radius = base + Double(ring) * 0.85
+        let angle = (Double(index) + (ring % 2 == 0 ? 0 : 0.5)) / Double(perRing) * 2 * .pi
+        let hearth = hearthCell(of: seat)
+        return (hearth.row + sin(angle) * radius, hearth.col + cos(angle) * radius)
+    }
+
+    /// Kad se kapacitet promijeni, seljaci se rasporede na novi krug.
+    func refreshFireCircle(of seat: RealmSeat) {
+        var slot = 0
+        for person in peopleOf(faction: seat.id) where person.role == .peasant {
+            switch person.activity {
+            case .atFire, .returningToFire:
+                let pos = fireSlotPosition(seat: seat, slot: slot)
+                let index = slot
+                let here = hypot(person.row - pos.row, person.col - pos.col)
+                let aim = hypot(person.targetRow - pos.row, person.targetCol - pos.col)
+                if person.slot != index || here > 0.2 || aim > 0.2 {
+                    people.update(id: person.id) {
+                        $0.slot = index
+                        $0.targetRow = pos.row
+                        $0.targetCol = pos.col
+                        if $0.activity == .atFire {
+                            $0.row = pos.row
+                            $0.col = pos.col
+                            $0.facing = facingHearth($0, seat: seat)
+                        }
+                    }
+                }
+                slot += 1
+            default:
+                break
+            }
+        }
+    }
+
+    /// Vojnici stoje u postroju sa strane dvorca suprotne od vatre.
+    private func rallySlotPosition(seat: RealmSeat, slot: Int) -> (row: Double, col: Double) {
+        let front = seat.castleRow - hearthCell(of: seat).row
+        return (seat.castleRow + front + 1 + Double(slot / 6), seat.castleCol - 2.5 + Double(slot % 6))
+    }
+
+    private func freeSlot(faction: String, soldiers: Bool) -> Int {
+        let used = Set(peopleOf(faction: faction).filter { soldiers ? $0.role == .soldier : $0.role == .peasant }.map(\.slot))
+        return (0...).first { !used.contains($0) } ?? 0
+    }
+
+    private func facingHearth(_ person: Person, seat: RealmSeat) -> Double {
+        let hearth = hearthCell(of: seat)
+        return atan2(hearth.col - person.col, hearth.row - person.row)
+    }
+
+    // MARK: - Stvaranje
+
+    /// Na početku partije nema ljudi; prsten iznad vatre dovodi ih do kapaciteta. Zalihe su iste za sve.
+    func spawnStartingPeople() {
+        people.reset()
+        oxen.reset()
+        seedFactionStocks()
+        resetHappinessForNewMatch()
+        resetRelations()
+        populationProgress = [:]
+        populationRing.reset()
+        bindMatchRuntimes()
+        if showsGraphics, !isGamePaused {
+            people.startTimer()
+            oxen.startTimer()
+        }
+        refreshPeopleCount()
+    }
+
+    /// Poveži hod i volove s mapom. Mora se zvati i nakon učitavanja partije.
+    func bindMatchRuntimes() {
+        people.onArrive = { [weak self] person in self?.personArrived(person) }
+        people.findPath = { [weak self] person, from, to in
+            guard let self else { return [to] }
+            if let job = person.activity.jobPlacementId,
+               let haul = self.buildingStates[job]?.haulGood,
+               let storeId = self.buildingStates[job]?.dropOffId,
+               let routed = self.warehousePath(workplaceId: job, storeId: storeId, good: haul, from: from, to: to) {
+                return routed
+            }
+            return self.pathFinder.path(
+                in: self.mapLogic,
+                from: from,
+                to: to,
+                useUnderground: CandleRules.hasCandles(self, person.factionId)
+            )
+        }
+        oxen.routeOf = { [weak self] depotId in self?.transportLines[depotId]?.corners ?? [] }
+        oxen.onUnload = { [weak self] cart in
+            guard let self, let faction = self.locatePlacement(id: cart.depotId).flatMap({ self.owner(of: $0.placement) }) else { return true }
+            var leftover: [Good: Int] = [:]
+            for (good, amount) in cart.cargo {
+                if let kind = StorageKind.of(good) {
+                    let free = self.storageCapacity(kind, of: faction) - self.storageStored(kind, of: faction)
+                    let take = min(amount, max(0, free))
+                    if take > 0 { self.addGood(good, take, to: faction) }
+                    if amount > take { leftover[good] = amount - take }
+                } else {
+                    self.addGood(good, amount, to: faction)
+                }
+            }
+            cart.cargo = leftover
+            return leftover.isEmpty
+        }
+    }
+
+    /// Novi seljak dolazi izdaleka i staje uz vatru.
+    func immigrate(seat: RealmSeat) {
+        let slot = freeSlot(faction: seat.id, soldiers: false)
+        let pos = fireSlotPosition(seat: seat, slot: slot)
+        let outward = atan2(pos.row - hearthCell(of: seat).row, pos.col - hearthCell(of: seat).col)
+        let startRow = min(max(1, pos.row + sin(outward) * 2), Double(gameMap.rows - 2))
+        let startCol = min(max(1, pos.col + cos(outward) * 2), Double(gameMap.cols - 2))
+        people.add(Person(id: UUID().uuidString, factionId: seat.id, colorHex: seat.colorHex, role: .peasant, activity: .returningToFire,
+                          row: startRow, col: startCol, targetRow: pos.row, targetCol: pos.col, slot: slot))
+        refreshPeopleCount()
+    }
+
+    /// Koliko ljudi frakcija može imati: dvorac + 10 po kući koju posjeduje.
+    func populationCapacity(of faction: String) -> Int {
+        Self.baseCapacity + liveCount(House.objectId, of: faction) * Self.peoplePerHouse
+    }
+
+    func peasantsAtFire(of faction: String) -> Int {
+        peopleOf(faction: faction).filter { $0.role == .peasant }.count
+    }
+
+    var populationCapacity: Int {
+        playerSeat.map { populationCapacity(of: $0.id) } ?? Self.baseCapacity
+    }
+
+    // MARK: - Posao
+
+    private func personArrived(_ person: Person) {
+        switch person.activity {
+        case .working(let placementId):
+            buildingStates[placementId]?.worker = .inside
+        case .delivering(let fromId, let toId):
+            depositDelivery(from: fromId, to: toId)
+        case .fetching(let fromId, let storeId):
+            finishFetch(from: fromId, storeId: storeId)
+        case .returningToWork(let placementId):
+            people.update(id: person.id) { $0.activity = .working(placementId: placementId) }
+            buildingStates[placementId]?.worker = .inside
+        case .atFire:
+            guard let seat = realmSeats.seats.first(where: { $0.id == person.factionId }) else { return }
+            people.update(id: person.id) { $0.facing = facingHearth($0, seat: seat) }
+        case .leaving:
+            people.remove(id: person.id)
+            refreshPeopleCount()
+        default:
+            break
+        }
+    }
+
+    /// Ulaz u građevinu: rub tlocrta najbliži vatri.
+    func entrance(of placement: Placement, from hearth: (row: Double, col: Double)) -> (row: Double, col: Double) {
+        let row = min(max(hearth.row, Double(placement.row) - 1), Double(placement.row + placement.height))
+        let col = min(max(hearth.col, Double(placement.col) - 0.5), Double(placement.col + placement.width) - 0.5)
+        return (row, col)
+    }
+
+    /// Najbliži slobodni seljak vlasnika dobiva posao. Od tog trenutka je radnik i ne može se označiti.
+    func assignWorker(to placement: Placement) -> Person? {
+        guard let faction = owner(of: placement), let seat = seat(of: faction) else { return nil }
+        let target = entrance(of: placement, from: hearthCell(of: seat))
+        let idle = peopleOf(faction: seat.id).filter { $0.role == .peasant }
+        guard let person = idle.min(by: { hypot($0.row - target.row, $0.col - target.col) < hypot($1.row - target.row, $1.col - target.col) }) else { return nil }
+        let destLayer = locatePlacement(id: placement.id)?.layer ?? .surface
+        people.update(id: person.id) {
+            $0.role = .worker
+            $0.activity = .walkingToWork(placementId: placement.id)
+            $0.targetRow = target.row
+            $0.targetCol = target.col
+            $0.targetLayer = destLayer
+        }
+        return people.person(id: person.id)
+    }
+
+    /// Radnik napušta posao i vraća se vatri kao seljak.
+    func releaseWorker(of placementId: String) {
+        for person in people.people where person.activity.jobPlacementId == placementId {
+            guard let seat = realmSeats.seats.first(where: { $0.id == person.factionId }) else { continue }
+            let slot = freeSlot(faction: seat.id, soldiers: false)
+            let pos = fireSlotPosition(seat: seat, slot: slot)
+            people.update(id: person.id) {
+                $0.role = .peasant
+                $0.slot = slot
+                $0.activity = .returningToFire
+                $0.targetRow = pos.row
+                $0.targetCol = pos.col
+                $0.targetLayer = .surface
+            }
+        }
+    }
+
+    func worker(of placementId: String) -> Person? {
+        people.people.first { $0.activity.jobPlacementId == placementId }
+    }
+
+    /// Potezi do dolaska radnika.
+    func ticksUntilArrival(_ person: Person) -> Int {
+        max(1, Int((hypot(person.targetRow - person.row, person.targetCol - person.col) / PeopleRuntime.speedCellsPerSecond).rounded(.up)))
+    }
+
+    // MARK: - Vojska
+
+    func hasTrainingGround(of faction: String) -> Bool {
+        liveCount(Training.objectId, of: faction) > 0
+    }
+
+    var hasTrainingGround: Bool {
+        playerSeat.map { hasTrainingGround(of: $0.id) } ?? false
+    }
+
+    /// Trening frakcije najbliži njezinoj vatri.
+    func trainingGround(of faction: String) -> Placement? {
+        guard let seat = seat(of: faction) else { return nil }
+        let hearth = hearthCell(of: seat)
+        return mapLogic.allPlacements
+            .map(\.placement)
+            .filter { $0.objectId == Training.objectId && !$0.isDestroyed && owner(of: $0) == faction }
+            .min { hypot(Double($0.row) - hearth.row, Double($0.col) - hearth.col) < hypot(Double($1.row) - hearth.row, Double($1.col) - hearth.col) }
+    }
+
+    func freePeasants(of faction: String) -> Int {
+        peopleOf(faction: faction).filter { $0.role == .peasant }.count
+    }
+
+    /// Što fali za obuku; nil = može se obučiti.
+    func trainingProblem(_ type: SoldierType, faction: String) -> String? {
+        if trainingGround(of: faction) == nil { return "Treba Trening." }
+        let price = PriceList.soldierPrice(type)
+        if let lack = missing(for: price, faction: faction) { return "Nedostaje \(lack)." }
+        if freePeasants(of: faction) == 0 { return "Nema slobodnog seljaka." }
+        return nil
+    }
+
+    /// Slobodni seljak + oprema iz oružarnice + zlato → vojnik. Pojavi se ispred Treninga
+    /// i ode u postroj. Bez frakcije trenira igrač. Vraća poruku zašto ne, ili nil kad uspije.
+    @discardableResult
+    func trainSoldier(_ type: SoldierType, faction: String? = nil) -> String? {
+        guard let seat = faction.flatMap({ seat(of: $0) }) ?? playerSeat else { return "Nema dvorca." }
+        if let problem = trainingProblem(type, faction: seat.id) { return problem }
+        guard let ground = trainingGround(of: seat.id),
+              let peasant = peopleOf(faction: seat.id).first(where: { $0.role == .peasant && $0.activity == .atFire })
+                ?? peopleOf(faction: seat.id).first(where: { $0.role == .peasant }) else {
+            return "Nema slobodnog seljaka."
+        }
+        pay(PriceList.soldierPrice(type), faction: seat.id)
+        let slot = freeSlot(faction: seat.id, soldiers: true)
+        let pos = rallySlotPosition(seat: seat, slot: slot)
+        let exitRow = Double(ground.row + ground.height) + 0.5
+        let exitCol = Double(ground.col) + Double(ground.width) / 2 - 0.5 + Double(slot % 3) - 1
+        people.update(id: peasant.id) {
+            $0.role = .soldier
+            $0.soldierType = type
+            $0.weapon = type.mainWeapon
+            $0.healthPercent = 100
+            $0.row = exitRow
+            $0.col = exitCol
+            $0.slot = slot
+            $0.activity = .soldierMoving
+            $0.targetRow = pos.row
+            $0.targetCol = pos.col
+            $0.targetLayer = .surface
+        }
+        return nil
+    }
+
+    /// Označeni vojnici unutar kvadrata. Seljak kod vatre i radnik se ne hvataju.
+    func soldiers(inside mark: GroundMark) -> [MarkedPerson] {
+        let minRow = Double(min(mark.originRow, mark.farRow)) - 0.5
+        let maxRow = Double(max(mark.originRow, mark.farRow)) + 0.5
+        let minCol = Double(min(mark.originCol, mark.farCol)) - 0.5
+        let maxCol = Double(max(mark.originCol, mark.farCol)) + 0.5
+        return people.people.compactMap { p in
+            let viewLayer: MapLayer = isUndergroundView ? .underground : .surface
+            guard p.canBeMarked, p.factionId == playerSeat?.id, p.layer == viewLayer,
+                  p.row >= minRow, p.row <= maxRow, p.col >= minCol, p.col <= maxCol else { return nil }
+            return MarkedPerson(id: p.id, name: p.displayName, colorHex: p.colorHex)
+        }
+    }
+
+    // MARK: - Potez
+
+    /// Označeni vojnici idu na ćeliju. Ulaz na površini šalje ih u podzemlje.
+    func sendMarkedSoldiers(row: Int, col: Int, layer: MapLayer? = nil) {
+        let destLayer = layer ?? {
+            if isUndergroundView { return .underground }
+            if undergroundEntrance(row: row, col: col) != nil { return .underground }
+            return .surface
+        }()
+        let ids = markedPeople.compactMap { people.person(id: $0.id)?.canBeMarked == true ? $0.id : nil }
+        guard !ids.isEmpty else { return }
+        if destLayer == .underground, let faction = playerSeat?.id, !CandleRules.hasCandles(self, faction) {
+            placementError = "Hodnici rade samo sa svijećom (košnica → vosak → svijeća)."
+        }
+        for id in ids {
+            people.update(id: id) {
+                $0.activity = .soldierMoving
+                $0.targetRow = Double(row)
+                $0.targetCol = Double(col)
+                $0.targetLayer = destLayer
+                $0.pathTarget = nil
+            }
+        }
+    }
+
+    func tickPeople() {
+        var candleKey = 0
+        for seat in realmSeats.seats {
+            candleKey = candleKey &* 31 &+ (CandleRules.hasCandles(self, seat.id) ? 1 : 0)
+        }
+        let version = ObjectIdentifier(mapLogic).hashValue &+ candleKey
+        if people.mapVersion != version { people.mapVersion = version }
+        if !showsGraphics {
+            people.advance(dt: 1)
+            oxen.advance(dt: 1)
+        }
+        let live = Set(mapLogic.allPlacements.map(\.placement.id))
+        for person in people.people {
+            guard let job = person.activity.jobPlacementId else { continue }
+            let state = buildingStates[job]
+            if !live.contains(job) || state?.isClosed == true || state?.isOnFire == true {
+                releaseWorker(of: job)
+                buildingStates[job]?.worker = .none
+            }
+        }
+        tickPopulationFlow()
+        refreshCastleEnclosure()
+    }
+}

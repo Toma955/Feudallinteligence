@@ -19,15 +19,20 @@ struct FeudalismApp: App {
         WindowGroup {
             Group {
                 if gameState.isShowingMainMenu {
-                    if gameState.showStartupAnimation, showIntroScreen {
+                    let skipIntro = ProcessInfo.processInfo.arguments.contains("-skipIntro")
+                    if skipIntro {
+                        MainMenuView()
+                    } else if gameState.showStartupAnimation, showIntroScreen {
                         IntroView(onComplete: { showIntroScreen = false })
                     } else {
                         MainMenuView()
                     }
                 } else if gameState.isMapEditorMode {
                     MapEditorView()
-                } else {
+                } else if gameState.showsGraphics {
                     ContentView()
+                } else {
+                    SimulatorView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

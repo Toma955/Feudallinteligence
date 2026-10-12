@@ -2,16 +2,15 @@
 //  MapCell.swift
 //  Feudalism
 //
-//  Jedna ćelija mape (40×40): textureId (jedna), objectIds (više), elevation (može u minus),
-//  walkable, buildable, canAfforest, canDigChannels. Zauzetost građevinama iz Placement-a.
+//  Jedna ćelija mape (1×1 m): vlastiti id, teren (površina), visina (-5 … +100 m),
+//  srednja točka ploče, indeks kretanja i naslaga resursa (kamen, željezo) koja dopušta vađenje.
+//  Kutovi ploče su u GameMap.vertexHeights / vertexOffsets jer ih dijele susjedi.
 //
 
 import Foundation
 
-/// Jedna ćelija mape (1×1 u gridu za gradnju) – runtime podaci u datoteci:
-/// id, x/y, textureId, objectIds, terrain, height (elevacija; može u minus), resource,
-/// walkable, buildable, canAfforest, canDigChannels, površina (G=zemlja), prohodnost.
 struct MapCell: Identifiable, Codable {
+    /// Vlastiti id ćelije ("red_stupac"), jedinstven na mapi.
     var id: String { coordinate.cellId }
     let coordinate: MapCoordinate
     /// ID teksture (jedna po polju).
@@ -19,9 +18,11 @@ struct MapCell: Identifiable, Codable {
     /// ID objekata na polju (više: npr. žbunje, stabla, voda).
     var objectIds: [String] = []
     var terrain: TerrainType
-    /// Elevacija – može ići u minus.
-    var height: CGFloat = 0
-    /// Resurs na ćeliji (npr. naslaga kamena); nil = nema resursa.
+    /// Visina ćelije u metrima, -5 … +100.
+    var height: CGFloat = 0 {
+        didSet { height = TerrainHeight.clamp(height) }
+    }
+    /// Naslaga na ćeliji (kamen, željezo). Omogućuje gradnju rudnika/kamenoloma na tom području.
     var resource: ResourceType? = nil
     /// Može li se hodati.
     var walkable: Bool = true
@@ -31,40 +32,52 @@ struct MapCell: Identifiable, Codable {
     var canAfforest: Bool = false
     /// Može li se kopati kanal (kupanje kanala).
     var canDigChannels: Bool = false
-    /// Tip površine (G=zemlja, W=voda, P=ravnica, …). Default G.
-    var povrsina: PovrsinaType = .zemlja
-    /// Prohodnost – koliko brzo se može kretati (N, V, S, G, B). Default G = normalno.
-    var prohodnost: ProhodnostType = .normalno
+    /// Teren: pustinja, poluplodna, plodna, trava, voda, more, put, kamen, močvara.
+    var povrsina: PovrsinaType = .default
+    /// Indeks kretanja: 1 = normalno, 0 = neprohodno. Zadano iz terena, može se ručno promijeniti.
+    var movementIndex: Double = PovrsinaType.default.defaultMovementIndex
+    /// Srednja točka ploče. nil = sredina ćelije, visina je prosjek kutova.
+    var center: CellCenterPoint? = nil
 
-    /// Pojedinačne točke (vrhovi) kocke – 4 kuta ćelije, svaka s vlastitom koordinatom. Izvedeno iz generalne koordinate.
+    /// Kutovi ćelije u mreži (0 gornji lijevi, 1 gornji desni, 2 donji lijevi, 3 donji desni).
     var points: [MapCellPoint] {
         let r = Double(coordinate.row)
         let c = Double(coordinate.col)
         return [
-            MapCellPoint(row: r, col: c, index: 0),       // gornji lijevi
-            MapCellPoint(row: r, col: c + 1, index: 1),    // gornji desni
-            MapCellPoint(row: r + 1, col: c, index: 2),   // donji lijevi
-            MapCellPoint(row: r + 1, col: c + 1, index: 3) // donji desni
+            MapCellPoint(row: r, col: c, index: 0),
+            MapCellPoint(row: r, col: c + 1, index: 1),
+            MapCellPoint(row: r + 1, col: c, index: 2),
+            MapCellPoint(row: r + 1, col: c + 1, index: 3)
         ]
     }
 
-    init(coordinate: MapCoordinate, textureId: String = "grass", objectIds: [String] = [], terrain: TerrainType = .grass, height: CGFloat = 0, resource: ResourceType? = nil, walkable: Bool? = nil, buildable: Bool? = nil, canAfforest: Bool = false, canDigChannels: Bool = false, povrsina: PovrsinaType = .zemlja, prohodnost: ProhodnostType = .normalno) {
+    init(coordinate: MapCoordinate, textureId: String = "grass", objectIds: [String] = [], terrain: TerrainType = .grass, height: CGFloat = 0, resource: ResourceType? = nil, walkable: Bool? = nil, buildable: Bool? = nil, canAfforest: Bool = false, canDigChannels: Bool = false, povrsina: PovrsinaType = .default, movementIndex: Double? = nil, center: CellCenterPoint? = nil) {
         self.coordinate = coordinate
         self.textureId = textureId
         self.objectIds = objectIds
         self.terrain = terrain
-        self.height = height
+        self.height = TerrainHeight.clamp(height)
         self.resource = resource
-        self.walkable = walkable ?? terrain.defaultWalkable
-        self.buildable = buildable ?? terrain.defaultBuildable
+        self.walkable = walkable ?? (terrain.defaultWalkable && povrsina.isWalkable)
+        self.buildable = buildable ?? (terrain.defaultBuildable && povrsina.isBuildable)
         self.canAfforest = canAfforest
         self.canDigChannels = canDigChannels
         self.povrsina = povrsina
-        self.prohodnost = prohodnost
+        self.movementIndex = movementIndex ?? povrsina.defaultMovementIndex
+        self.center = center
+    }
+
+    /// Promijeni teren i postavi zadane vrijednosti kretanja i gradnje za njega.
+    mutating func applySurface(_ surface: PovrsinaType) {
+        povrsina = surface
+        movementIndex = surface.defaultMovementIndex
+        walkable = surface.isWalkable
+        buildable = surface.isBuildable
     }
 
     enum CodingKeys: String, CodingKey {
-        case coordinate, textureId, objectIds, terrain, height, resource, walkable, buildable, canAfforest, canDigChannels, povrsina, prohodnost
+        case coordinate, textureId, objectIds, terrain, height, resource, walkable, buildable, canAfforest, canDigChannels, povrsina, movementIndex, center
+        case prohodnost
     }
 
     init(from decoder: Decoder) throws {
@@ -74,14 +87,21 @@ struct MapCell: Identifiable, Codable {
         objectIds = try c.decodeIfPresent([String].self, forKey: .objectIds) ?? []
         terrain = try c.decode(TerrainType.self, forKey: .terrain)
         let h = try c.decodeIfPresent(Double.self, forKey: .height) ?? 0
-        height = CGFloat(h)
+        height = TerrainHeight.clamp(CGFloat(h))
         resource = try c.decodeIfPresent(ResourceType.self, forKey: .resource)
         walkable = try c.decodeIfPresent(Bool.self, forKey: .walkable) ?? terrain.defaultWalkable
         buildable = try c.decodeIfPresent(Bool.self, forKey: .buildable) ?? terrain.defaultBuildable
         canAfforest = try c.decodeIfPresent(Bool.self, forKey: .canAfforest) ?? false
         canDigChannels = try c.decodeIfPresent(Bool.self, forKey: .canDigChannels) ?? false
-        povrsina = try c.decodeIfPresent(PovrsinaType.self, forKey: .povrsina) ?? .zemlja
-        prohodnost = try c.decodeIfPresent(ProhodnostType.self, forKey: .prohodnost) ?? .normalno
+        povrsina = try c.decodeIfPresent(PovrsinaType.self, forKey: .povrsina) ?? .default
+        if let index = try c.decodeIfPresent(Double.self, forKey: .movementIndex) {
+            movementIndex = index
+        } else if let legacy = try c.decodeIfPresent(String.self, forKey: .prohodnost) {
+            movementIndex = Self.legacyMovementIndex(legacy)
+        } else {
+            movementIndex = povrsina.defaultMovementIndex
+        }
+        center = try c.decodeIfPresent(CellCenterPoint.self, forKey: .center)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -97,6 +117,18 @@ struct MapCell: Identifiable, Codable {
         try c.encode(canAfforest, forKey: .canAfforest)
         try c.encode(canDigChannels, forKey: .canDigChannels)
         try c.encode(povrsina, forKey: .povrsina)
-        try c.encode(prohodnost, forKey: .prohodnost)
+        try c.encode(movementIndex, forKey: .movementIndex)
+        try c.encodeIfPresent(center, forKey: .center)
+    }
+
+    /// Stare mape: N neprohodno, V vrlo sporo, S sporo, G normalno, B brzo.
+    private static func legacyMovementIndex(_ letter: String) -> Double {
+        switch letter {
+        case "N": return 0
+        case "V": return 0.25
+        case "S": return 0.5
+        case "B": return 1.5
+        default: return 1
+        }
     }
 }

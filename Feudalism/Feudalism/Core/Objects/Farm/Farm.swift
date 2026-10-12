@@ -2,14 +2,16 @@
 //  Farm.swift
 //  Feudalism
 //
-//  Objekt Farma. Folder: Core/Objects/Farm/
-//  Kasnije: .obj / .usdz model i tekstura u ovom folderu.
+//  Farma pšenice. Folder: Core/Objects/Farm/
+//  Tlocrt 5×5: četiri polja 2×2, križ za prolaz, mala zgrada na polju 4.
 //
 
 import Foundation
+import SceneKit
+import AppKit
 
-/// Farma – objekt koji se gradi na karti. Kategorija: farme.
-enum Farm {
+/// Farma pšenice – objekt koji se gradi na karti. Kategorija: farme.
+enum Farm: PlaceableSceneKitObject {
     /// Stabilan id tipa (za placement na mapi).
     static let objectId = "object_farm"
 
@@ -22,16 +24,24 @@ enum Farm {
     /// Podmapa u bundleu za budući .obj / teksturu.
     static let modelSubdirectory = "Core/Objects/Farm"
 
-    /// Jedan GameObject za Farmu – za katalog i placement na mapi. 4×4 ćelije.
+    private static let color = NSColor(red: 0.86, green: 0.72, blue: 0.32, alpha: 1)
+
     static var gameObject: GameObject {
-        GameObject(
+        let d = ObjectDimensions.farm
+        return GameObject(
             id: objectId,
-            name: "Farma",
+            name: "Farma pšenice",
             category: .farme,
-            width: 4,
-            height: 4,
+            width: d.cellWidth,
+            height: d.cellHeight,
             displayCode: displayCode,
             modelAssetName: modelAssetName
         )
     }
+
+    static func loadSceneKitNode(from bundle: Bundle = .main) -> SCNNode? {
+        FarmYard.makeNode(name: "farm", field: color, crop: .wheat)
+    }
+
+    static func reapplyTexture(to node: SCNNode, bundle: Bundle = .main) -> Bool { true }
 }

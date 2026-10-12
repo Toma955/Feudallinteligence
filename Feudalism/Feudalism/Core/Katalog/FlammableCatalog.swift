@@ -26,29 +26,12 @@ final class FlammableCatalog {
     }
 
     private func registerDefaults() {
-        // Zidovi – mogu gorjeti, vatra oduzima 2 HP/tick
-        set(FlammableEntry(objectId: HugeWall.objectId, fireDamagePerTick: 2))
-        set(FlammableEntry(objectId: SmallWall.objectId, fireDamagePerTick: 2))
-        // Drveni / lakši objekti – brže gore
-        set(FlammableEntry(objectId: Farm.objectId, fireDamagePerTick: 3))
-        set(FlammableEntry(objectId: Chicken.objectId, fireDamagePerTick: 3))
-        set(FlammableEntry(objectId: Corn.objectId, fireDamagePerTick: 3))
-        set(FlammableEntry(objectId: Windmill.objectId, fireDamagePerTick: 3))
-        set(FlammableEntry(objectId: Bakery.objectId, fireDamagePerTick: 3))
-        set(FlammableEntry(objectId: Granary.objectId, fireDamagePerTick: 3))
-        set(FlammableEntry(objectId: Food.objectId, fireDamagePerTick: 3))
-        // Kuće, tržnica, industrija – srednje
-        set(FlammableEntry(objectId: House.objectId, fireDamagePerTick: 2))
-        set(FlammableEntry(objectId: Hotel.objectId, fireDamagePerTick: 2))
-        set(FlammableEntry(objectId: Market.objectId, fireDamagePerTick: 2))
-        set(FlammableEntry(objectId: Well.objectId, fireDamagePerTick: 1))
-        set(FlammableEntry(objectId: Industry.objectId, fireDamagePerTick: 2))
-        set(FlammableEntry(objectId: Iron.objectId, fireDamagePerTick: 1))
-        set(FlammableEntry(objectId: Stone.objectId, fireDamagePerTick: 1))
-        // Dvorac – najsporije gori
-        set(FlammableEntry(objectId: Castle.objectId, fireDamagePerTick: 1))
-        // Stepenice – kamen, sporo
-        set(FlammableEntry(objectId: Steps.objectId, fireDamagePerTick: 1))
+        for objectId in ObjectBehaviorRegistry.allObjectIds {
+            let b = ObjectBehaviorRegistry.behavior(for: objectId)
+            if b.isFlammable && b.fireDamagePerTick > 0 {
+                set(FlammableEntry(objectId: objectId, fireDamagePerTick: b.fireDamagePerTick))
+            }
+        }
     }
 
     func set(_ entry: FlammableEntry) {

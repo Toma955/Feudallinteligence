@@ -1,31 +1,35 @@
-//
-//  BarIconView.swift
-//  Feudalism
-//
-//  Zajednička ikona za donji bar: asset ili SF Symbol fallback.
-//
-
 import SwiftUI
 import AppKit
 
-/// Učita NSImage za ikonu donjeg bara (cacheirano). Prvo Assets.xcassets, pa Icons/icons u bundleu.
 func loadBarIcon(named name: String) -> NSImage? {
     BarIconCache.shared.image(named: name, bundle: .main)
 }
 
-/// Ikona za donji bar: asset (castle, wall, sword, …) ili SF Symbol.
+func templateCopy(_ image: NSImage, enabled: Bool) -> NSImage {
+    guard enabled else { return image }
+    let copy = image.copy() as? NSImage ?? NSImage(size: image.size)
+    copy.isTemplate = true
+    return copy
+}
+
 struct BarIconView: View {
     let assetName: String
     let systemName: String
-    /// Veličina ikone u pt; zadano 48.
     var size: CGFloat = 48
-    private var image: NSImage? { BarIconCache.shared.image(named: assetName, bundle: .main) }
+    /// Crnu linijsku PNG ikonu oboji foreground bojom (bijela na donjem baru).
+    var asTemplate: Bool = false
+
+    private var image: NSImage? {
+        guard let src = BarIconCache.shared.image(named: assetName, bundle: .main) else { return nil }
+        return templateCopy(src, enabled: asTemplate)
+    }
 
     var body: some View {
         Group {
             if let nsImage = image {
                 Image(nsImage: nsImage)
                     .resizable()
+                    .renderingMode(asTemplate ? .template : .original)
                     .scaledToFit()
             } else {
                 Image(systemName: systemName)

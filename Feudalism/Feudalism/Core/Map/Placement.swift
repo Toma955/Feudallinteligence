@@ -24,12 +24,15 @@ struct Placement: Identifiable, Codable, Sendable {
     let height: Int
     /// Trenutni život (HP). Maksimum iz ObjectHealth za objectId (npr. zid: 10 levela × 10 = 100).
     let currentHealth: Int
+    /// Frakcija (RealmSeat.id) koja posjeduje građevinu. nil = postavljeno u map editoru;
+    /// u partiji takvu građevinu preuzima najbliži dvorac.
+    let ownerId: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, objectId, row, col, width, height, currentHealth
+        case id, objectId, row, col, width, height, currentHealth, ownerId
     }
 
-    init(id: String? = nil, objectId: String, row: Int, col: Int, width: Int, height: Int, currentHealth: Int? = nil) {
+    init(id: String? = nil, objectId: String, row: Int, col: Int, width: Int, height: Int, currentHealth: Int? = nil, ownerId: String? = nil) {
         self.id = id ?? UUID().uuidString
         self.objectId = objectId
         self.row = row
@@ -37,6 +40,7 @@ struct Placement: Identifiable, Codable, Sendable {
         self.width = max(1, width)
         self.height = max(1, height)
         self.currentHealth = currentHealth ?? ObjectHealth.shared.maxHealth(for: objectId)
+        self.ownerId = ownerId
     }
 
     init(from decoder: Decoder) throws {
@@ -49,6 +53,7 @@ struct Placement: Identifiable, Codable, Sendable {
         width = try c.decode(Int.self, forKey: .width)
         height = try c.decode(Int.self, forKey: .height)
         currentHealth = try c.decodeIfPresent(Int.self, forKey: .currentHealth) ?? ObjectHealth.shared.maxHealth(for: decodedObjectId)
+        ownerId = try c.decodeIfPresent(String.self, forKey: .ownerId)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -60,6 +65,7 @@ struct Placement: Identifiable, Codable, Sendable {
         try c.encode(width, forKey: .width)
         try c.encode(height, forKey: .height)
         try c.encode(currentHealth, forKey: .currentHealth)
+        try c.encodeIfPresent(ownerId, forKey: .ownerId)
     }
 
     /// Sve koordinate koje ovaj placement pokriva: [row..row+height) × [col..col+width).
@@ -74,4 +80,12 @@ struct Placement: Identifiable, Codable, Sendable {
         coordinate.row >= row && coordinate.row < row + height &&
         coordinate.col >= col && coordinate.col < col + width
     }
+
+    /// Kopija placementa s novim trenutnim zdravljem (za primjenu štete ili liječenja).
+    func withHealth(_ newHealth: Int) -> Placement {
+        Placement(id: id, objectId: objectId, row: row, col: col, width: width, height: height, currentHealth: max(0, newHealth), ownerId: ownerId)
+    }
+
+    /// Je li objekt uništen (0 HP)?
+    var isDestroyed: Bool { currentHealth <= 0 }
 }

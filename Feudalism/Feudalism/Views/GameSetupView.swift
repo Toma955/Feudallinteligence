@@ -15,6 +15,8 @@ struct GameSetupView: View {
     @State private var humanName: String = ""
     @State private var humanColorHex: String = "2E86AB"
     @State private var selectedAIProfileIds: Set<String> = []
+    /// Čovjek u partiji = mapa. Isključeno = AI protiv AI, samo tekst.
+    @State private var humanPlays = true
 
     private let humanColorOptions: [(String, String)] = [
         ("2E86AB", "Plava"),
@@ -48,30 +50,31 @@ struct GameSetupView: View {
                         .foregroundStyle(.white)
                         .padding(.bottom, 8)
 
-                    // Human lord
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Ti (human lord)")
-                            .font(.headline)
-                            .foregroundStyle(.white.opacity(0.9))
-                        HStack(spacing: 12) {
-                            Image(systemName: "person.crop.circle.fill")
-                                .font(.title)
-                                .foregroundStyle(Color(hex: humanColorHex) ?? .blue)
-                            TextField("Tvoje ime", text: $humanName)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(maxWidth: 280)
-                            Menu {
-                                ForEach(humanColorOptions, id: \.0) { hex, label in
-                                    Button(label) { humanColorHex = hex }
+                    if humanPlays {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Ti (human lord)")
+                                .font(.headline)
+                                .foregroundStyle(.white.opacity(0.9))
+                            HStack(spacing: 12) {
+                                Image(systemName: "person.crop.circle.fill")
+                                    .font(.title)
+                                    .foregroundStyle(Color(hex: humanColorHex) ?? .blue)
+                                TextField("Tvoje ime", text: $humanName)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(maxWidth: 280)
+                                Menu {
+                                    ForEach(humanColorOptions, id: \.0) { hex, label in
+                                        Button(label) { humanColorHex = hex }
+                                    }
+                                } label: {
+                                    Circle()
+                                        .fill(Color(hex: humanColorHex) ?? .blue)
+                                        .frame(width: 28, height: 28)
+                                        .overlay(Circle().strokeBorder(.white.opacity(0.5), lineWidth: 1))
                                 }
-                            } label: {
-                                Circle()
-                                    .fill(Color(hex: humanColorHex) ?? .blue)
-                                    .frame(width: 28, height: 28)
-                                    .overlay(Circle().strokeBorder(.white.opacity(0.5), lineWidth: 1))
                             }
+                            .padding(.vertical, 4)
                         }
-                        .padding(.vertical, 4)
                     }
 
                     // AI lordovi
@@ -94,7 +97,21 @@ struct GameSetupView: View {
                         }
                     }
 
-                    // Pokreni igru
+                    CampaignSetupSection(campaign: $gameState.campaign)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle(isOn: $humanPlays) {
+                            Text(LocalizedStrings.string(for: "match_human_plays", language: gameState.appLanguage))
+                                .foregroundStyle(.white.opacity(0.9))
+                        }
+                        .toggleStyle(.switch)
+                        Text(humanPlays
+                             ? LocalizedStrings.string(for: "match_mode_ui", language: gameState.appLanguage)
+                             : LocalizedStrings.string(for: "match_mode_text", language: gameState.appLanguage))
+                            .font(.system(size: 13))
+                            .foregroundStyle(.white.opacity(0.65))
+                    }
+
                     Button(action: startGame) {
                         Text("Pokreni igru")
                             .font(.custom("Georgia", size: 20))
@@ -115,7 +132,7 @@ struct GameSetupView: View {
     }
 
     private var canStart: Bool {
-        true
+        humanPlays || selectedAIProfileIds.count >= 2
     }
 
     private func toggleAI(_ profileId: String) {
@@ -130,7 +147,8 @@ struct GameSetupView: View {
         gameState.startNewGameWithSetup(
             humanName: humanName.trimmingCharacters(in: .whitespacesAndNewlines),
             humanColorHex: humanColorHex,
-            selectedAIProfileIds: Array(selectedAIProfileIds)
+            selectedAIProfileIds: Array(selectedAIProfileIds),
+            includeHuman: humanPlays
         )
         dismiss()
     }

@@ -7,7 +7,6 @@
 
 import SwiftUI
 
-private let columnWidth: CGFloat = 48
 /// Visina ikona u proširenom izborniku (niska traka).
 private let expandedIconSize: CGFloat = 34
 
@@ -29,51 +28,50 @@ struct FarmButtonExpandedView: View {
     var body: some View {
         VStack(alignment: .center, spacing: 0) {
             // Red ikona
-            HStack(spacing: 14) {
-                AppleFarmBarButtonView(action: onSelectAppleFarm, iconOnly: true, iconOnlySize: 40)
-                    .frame(width: columnWidth, alignment: .center)
+            HStack(spacing: 6) {
+                AppleFarmBarButtonView(action: onSelectAppleFarm, iconOnly: true, iconOnlySize: 34)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 WheatFarmBarButtonView(action: onSelectWheatFarm, iconOnly: true)
-                    .frame(width: columnWidth, alignment: .center)
-                    .padding(.leading, 8)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 CornFarmBarButtonView(action: onSelectCornFarm, iconOnly: true)
-                    .frame(width: columnWidth, alignment: .center)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 HayFarmBarButtonView(action: onSelectHayFarm, iconOnly: true)
-                    .frame(width: columnWidth, alignment: .center)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 VegetablesFarmBarButtonView(action: onSelectVegetablesFarm, iconOnly: true)
-                    .frame(width: columnWidth, alignment: .center)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 GrapesFarmBarButtonView(action: onSelectGrapesFarm, iconOnly: true)
-                    .frame(width: columnWidth, alignment: .center)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 SpicesFarmBarButtonView(action: onSelectSpicesFarm, iconOnly: true)
-                    .frame(width: columnWidth, alignment: .center)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 FlowerFarmBarButtonView(action: onSelectFlowerFarm, iconOnly: true)
-                    .frame(width: columnWidth, alignment: .center)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 Rectangle()
                     .fill(.white.opacity(0.25))
                     .frame(width: 1, height: expandedIconSize)
                 PigFarmBarButtonView(action: onSelectPigFarm, iconOnly: true)
-                    .frame(width: columnWidth, alignment: .center)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 CowFarmBarButtonView(action: onSelectCowFarm, iconOnly: true)
-                    .frame(width: columnWidth, alignment: .center)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 SheepFarmBarButtonView(action: onSelectSheepFarm, iconOnly: true)
-                    .frame(width: columnWidth, alignment: .center)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 ChickenFarmBarButtonView(action: onSelectChickenFarm, iconOnly: true)
-                    .frame(width: columnWidth, alignment: .center)
+                    .frame(maxWidth: .infinity, alignment: .center)
             }
             // Jedan red natpisa, malo dole
-            HStack(spacing: 14) {
-                farmLabel("apple_farm").frame(width: columnWidth, alignment: .center)
-                farmLabel("wheat_farm").frame(width: columnWidth, alignment: .center)
-                farmLabel("corn_farm").frame(width: columnWidth, alignment: .center)
-                farmLabel("resource_hop").frame(width: columnWidth, alignment: .center)
-                farmLabel("vegetables_farm").frame(width: columnWidth, alignment: .center)
-                farmLabel("grapes_farm").frame(width: columnWidth, alignment: .center)
-                farmLabel("spices_farm").frame(width: columnWidth, alignment: .center)
-                farmLabel("flower_farm").frame(width: columnWidth, alignment: .center)
+            HStack(spacing: 6) {
+                farmLabel("apple_farm")
+                farmLabel("wheat_farm")
+                farmLabel("corn_farm")
+                farmLabel("resource_hop")
+                farmLabel("vegetables_farm")
+                farmLabel("grapes_farm")
+                farmLabel("spices_farm")
+                farmLabel("flower_farm")
                 Color.clear.frame(width: 1)
-                farmLabel("pig_farm").frame(width: columnWidth, alignment: .center)
-                farmLabel("cow_farm").frame(width: columnWidth, alignment: .center)
-                farmLabel("sheep_farm").frame(width: columnWidth, alignment: .center)
-                farmLabel("chicken_farm").frame(width: columnWidth, alignment: .center)
+                farmLabel("pig_farm")
+                farmLabel("cow_farm")
+                farmLabel("sheep_farm")
+                farmLabel("chicken_farm")
             }
             .padding(.top, 2)
         }
@@ -83,9 +81,11 @@ struct FarmButtonExpandedView: View {
 
     private func farmLabel(_ key: String) -> some View {
         Text(LocalizedStrings.string(for: key, language: gameState.appLanguage))
-            .font(.system(size: 9))
+            .font(.system(size: 10))
             .foregroundStyle(.white.opacity(0.9))
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
+            .multilineTextAlignment(.center)
+            .lineLimit(2)
+            .minimumScaleFactor(0.7)
+            .frame(maxWidth: .infinity, minHeight: 26, alignment: .top)
     }
 }

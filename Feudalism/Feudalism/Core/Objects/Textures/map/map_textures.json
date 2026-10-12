@@ -1,0 +1,14 @@
+{
+  "_upute": "Teksture tla mape. Stavi PNG ili JPG u ovu mapu pod imenom iz polja datoteka (npr. map_plodna.png). Igra čita sliku pri pokretanju; ako je nema, koristi boju. Kasnije možeš dodati i map_*_NormalGL.jpg i map_*_Roughness.jpg. Slovo je oznaka površine u datoteci mape.",
+  "teksture": {
+    "D": { "naziv": "Pustinja", "datoteka": "map_pustinja", "boja": [0.93, 0.80, 0.45] },
+    "G": { "naziv": "Poluplodna zemlja", "datoteka": "map_poluplodna", "boja": [0.62, 0.66, 0.32] },
+    "F": { "naziv": "Plodna zemlja", "datoteka": "map_plodna", "boja": [0.20, 0.62, 0.18] },
+    "T": { "naziv": "Trava", "datoteka": "map_trava", "boja": [0.38, 0.58, 0.24] },
+    "W": { "naziv": "Voda", "datoteka": "map_voda", "boja": [0.25, 0.60, 1.00] },
+    "M": { "naziv": "More", "datoteka": "map_more", "boja": [0.05, 0.20, 0.65] },
+    "R": { "naziv": "Put", "datoteka": "map_put", "boja": [0.55, 0.42, 0.30] },
+    "S": { "naziv": "Kamen / stijena", "datoteka": "map_kamen", "boja": [0.55, 0.55, 0.58] },
+    "B": { "naziv": "Močvara", "datoteka": "map_mocvara", "boja": [0.30, 0.40, 0.25] }
+  }
+}

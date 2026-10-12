@@ -36,6 +36,7 @@ final class ComputerLordAI {
 
     /// Realna situacija u igri → reakcija i predviđanje. Snapshot je isti format koji Python koristi za treniranje.
     func decideNextAction(gameState: GameState) async {
+        guard gameState.aiEnabled else { return }
         let situation = GameSituationSnapshot.from(gameState: gameState, actingRealmId: realmId)
         let _ = profile
         // Ulaz u model: situation (realno stanje) + profile (osnovne postavke)

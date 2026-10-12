@@ -116,7 +116,7 @@ struct IntroView: View {
 
     /// Animacija naslova slovo po slovo; kad su sva slova i učitavanje gotovi, naslov ide gore u oblak.
     private func startSequence() {
-        let volume = gameState.audioMusicVolume
+        let volume = gameState.effectiveMusicVolume
         AudioManager.shared.playIntroSoundtrackIfAvailable(volume: volume)
 
         Task { await assetLoader.loadAllIfNeeded() }

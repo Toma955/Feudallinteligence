@@ -11,24 +11,58 @@ import Foundation
 final class AILordProfileStore: ObservableObject {
     static let shared = AILordProfileStore()
 
+    @Published private(set) var notebook: AILordNotebook = .emptyShared
+    @Published private(set) var levels: [AILordLevel] = []
     @Published private(set) var profiles: [AILordProfile] = []
+    /// Matrice levela po levelId; svaki level ima svoju datoteku.
+    private(set) var weights: [String: AILordWeights] = [:]
 
-    private let storageKey = "Feudalism.AILordProfiles"
+    private let storageKey = "Feudalism.AILordRoster"
+    private let versionKey = "Feudalism.AILordRosterVersion"
+    /// 1 = 16 lordova, jedna prazna bilježnica, leveli na 0.0.
+    private let rosterVersion = 1
+
+    private struct RosterSave: Codable {
+        var notebook: AILordNotebook
+        var levels: [AILordLevel]
+        var profiles: [AILordProfile]
+    }
 
     private init() {
-        load()
-        if profiles.isEmpty {
-            installDefaultProfiles()
+        let savedVersion = UserDefaults.standard.integer(forKey: versionKey)
+        if savedVersion >= rosterVersion {
+            load()
         }
+        if profiles.isEmpty {
+            installDefaultRoster()
+        }
+        loadWeights()
+    }
+
+    private func loadWeights() {
+        let vocabulary = notebook.vocabulary
+        for levelId in Set(profiles.map(\.levelId)) {
+            weights[levelId] = AILordWeightsStore.loadOrCreate(levelId: levelId, vocabulary: vocabulary)
+        }
+    }
+
+    func weights(for profile: AILordProfile) -> AILordWeights? {
+        weights[profile.levelId]
     }
 
     /// Učitaj sa diska (UserDefaults za sada; kasnije SwiftData).
     func load() {
         guard let data = UserDefaults.standard.data(forKey: storageKey),
-              let decoded = try? JSONDecoder().decode([AILordProfile].self, from: data) else {
+              let decoded = try? JSONDecoder().decode(RosterSave.self, from: data) else {
             return
         }
-        profiles = migrateIconsAndColorsIfNeeded(decoded)
+        notebook = decoded.notebook
+        levels = decoded.levels
+        profiles = migrateIconsAndColorsIfNeeded(decoded.profiles)
+    }
+
+    func level(for profile: AILordProfile) -> AILordLevel {
+        levels.first { $0.id == profile.levelId } ?? .empty(id: profile.levelId)
     }
 
     /// Ako su stari profili bez ikone/boje, dodaj im zadane vrijednosti.
@@ -55,10 +89,12 @@ final class AILordProfileStore: ObservableObject {
         }
     }
 
-    /// Spremi – profili ostaju i budu sve bolji kroz partije.
+    /// Spremi – profili, bilježnica i leveli ostaju kroz partije.
     func save() {
-        guard let data = try? JSONEncoder().encode(profiles) else { return }
+        let payload = RosterSave(notebook: notebook, levels: levels, profiles: profiles)
+        guard let data = try? JSONEncoder().encode(payload) else { return }
         UserDefaults.standard.set(data, forKey: storageKey)
+        UserDefaults.standard.set(rosterVersion, forKey: versionKey)
     }
 
     /// Dohvati profil po id.
@@ -84,23 +120,17 @@ final class AILordProfileStore: ObservableObject {
     func addProfile(_ profile: AILordProfile) {
         guard !profiles.contains(where: { $0.id == profile.id }) else { return }
         profiles.append(profile)
+        if weights[profile.levelId] == nil {
+            weights[profile.levelId] = AILordWeightsStore.loadOrCreate(levelId: profile.levelId, vocabulary: notebook.vocabulary)
+        }
         save()
     }
 
-    /// 10 AI lordova – svaki s ikonom i bojom da ih se razlikuje.
-    private func installDefaultProfiles() {
-        profiles = [
-            AILordProfile(name: "Vuk", description: "Brzi napadi, malo obrane.", iconName: "flame.fill", colorHex: "E74C3C", fightingStyle: .aggressive, strategyFocus: .conquest),
-            AILordProfile(name: "Kamen", description: "Utvrde i strpljenje.", iconName: "shield.fill", colorHex: "7F8C8D", fightingStyle: .defensive, strategyFocus: .survival),
-            AILordProfile(name: "Trgovac", description: "Zlato i gradnja.", iconName: "dollarsign.circle.fill", colorHex: "F1C40F", fightingStyle: .economic, strategyFocus: .trade),
-            AILordProfile(name: "Ravnoteža", description: "Sve po malo.", iconName: "scale.3d", colorHex: "3498DB", fightingStyle: .balanced, strategyFocus: .expansion),
-            AILordProfile(name: "Pljačkaš", description: "Napad-uzmi-bjež.", iconName: "theatermasks.fill", colorHex: "D35400", fightingStyle: .raider, strategyFocus: .military),
-            AILordProfile(name: "Pleme", description: "Savezi i pregovori.", iconName: "person.3.fill", colorHex: "27AE60", fightingStyle: .diplomat, strategyFocus: .trade),
-            AILordProfile(name: "Grom", description: "Šok i strah.", iconName: "bolt.fill", colorHex: "F39C12", fightingStyle: .aggressive, strategyFocus: .military),
-            AILordProfile(name: "Pčela", description: "Rad i blagostanje.", iconName: "ant.fill", colorHex: "B7950B", fightingStyle: .economic, strategyFocus: .expansion),
-            AILordProfile(name: "Sjenka", description: "Iznenađenje i povlačenje.", iconName: "moon.fill", colorHex: "8E44AD", fightingStyle: .raider, strategyFocus: .survival),
-            AILordProfile(name: "Most", description: "Savezi prije svega.", iconName: "link", colorHex: "1ABC9C", fightingStyle: .diplomat, strategyFocus: .trade)
-        ]
+    /// 16 lordova, jedna prazna bilježnica, svaki sa svojim levelom na 0.0.
+    private func installDefaultRoster() {
+        notebook = AILordRoster.makeNotebook()
+        levels = AILordRoster.makeLevels()
+        profiles = AILordRoster.makeProfiles()
         save()
     }
 }

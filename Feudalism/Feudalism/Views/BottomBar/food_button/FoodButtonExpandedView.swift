@@ -17,6 +17,8 @@ struct FoodButtonExpandedView: View {
     var onSelectPantry: () -> Void
     var onSelectBakery: () -> Void
     var onSelectCanteen: () -> Void
+    var onSelectCandleShop: () -> Void
+    var onSelectOrchard: () -> Void
 
     var body: some View {
         CategoryExpandedView(items: [
@@ -28,6 +30,8 @@ struct FoodButtonExpandedView: View {
             CategoryExpandedItem(assetName: "pantry", systemName: "cabinet.fill", labelKey: "food_smocnica", action: onSelectPantry),
             CategoryExpandedItem(assetName: "bakery", systemName: "birthday.cake.fill", labelKey: "food_bakery", action: onSelectBakery),
             CategoryExpandedItem(assetName: "cauldron", systemName: "frying.pan.fill", labelKey: "food_canteen", action: onSelectCanteen),
+            CategoryExpandedItem(assetName: "candle_resource", systemName: "flame.fill", labelKey: "food_candle", action: onSelectCandleShop),
+            CategoryExpandedItem(assetName: "apple_resource", systemName: "apple.logo", labelKey: "orchard_farm", action: onSelectOrchard),
         ])
     }
 }

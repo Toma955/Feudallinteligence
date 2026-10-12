@@ -1,24 +1,28 @@
-//
-//  BarIconCache.swift
-//  Feudalism
-//
-//  Centralizirano učitavanje ikona donjeg bara s memorijskim cacheom – jedan izvor, manje duplikata i I/O.
-//
-
 import AppKit
 
-/// Cache ikona za donji bar (asset ili bundle). Jedan singleton; svi viewovi koriste image(named:).
 final class BarIconCache {
     static let shared = BarIconCache()
 
     private let lock = NSLock()
     private var cache: [String: NSImage] = [:]
 
-    private static let subdirs = ["Core/Icons", "Icons", "Icons/resources", "icons", "Feudalism/Core/Icons", "Feudalism/Icons", "Feudalism/Icons/resources", "Feudalism/icons"]
+    private static let subdirs = [
+        "Icons",
+        "Icons/resources",
+        "icons",
+        "Core/Icons",
+        "Feudalism/Icons",
+        "Feudalism/Icons/resources",
+        "Feudalism/Feudalism/Icons",
+        "Feudalism/Feudalism/Icons/resources",
+        "Feudalism/Feudalism/Feudalism/Icons",
+        "Feudalism/Feudalism/Feudalism/Icons/resources",
+        "Feudalism/Core/Icons",
+        "Feudalism/icons",
+    ]
 
     private init() {}
 
-    /// Učita ikonu po imenu (bez ekstenzije). Prvo Assets.xcassets, pa Icons/icons u bundleu. Rezultat se cacheira.
     func image(named name: String, bundle: Bundle = .main) -> NSImage? {
         lock.lock()
         defer { lock.unlock() }
@@ -30,6 +34,10 @@ final class BarIconCache {
 
     private func loadUncached(named name: String, bundle: Bundle) -> NSImage? {
         if let img = NSImage(named: name) { return img }
+        if let url = bundle.url(forResource: name, withExtension: "png", subdirectory: nil),
+           let img = NSImage(contentsOf: url) {
+            return img
+        }
         for sub in Self.subdirs {
             if let url = bundle.url(forResource: name, withExtension: "png", subdirectory: sub),
                let img = NSImage(contentsOf: url) {

@@ -36,6 +36,6 @@ enum HugeWall: PlaceableSceneKitObject {
 
     static func printTextureDiagnostics(bundle: Bundle = .main) {}
     static func checkAndLogTextureStatus(bundle: Bundle = .main) -> (success: Bool, message: String) {
-        (true, "HugeWall koristi proceduralni model (1×40×40×400).")
+        (true, "HugeWall koristi proceduralni model (1×1×10 m).")
     }
 }

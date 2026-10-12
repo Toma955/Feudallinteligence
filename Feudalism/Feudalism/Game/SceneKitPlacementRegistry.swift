@@ -29,7 +29,7 @@ enum SceneKitPlacementRegistry {
         guard let obj = ObjectCatalog.shared.object(id: objectId) else { return nil }
         let w = max(1, obj.size.width)
         let h = max(1, obj.size.height)
-        let yOffset: CGFloat = objectId == Windmill.objectId ? 8 : 0
+        let yOffset: CGFloat = 0
         return SceneKitPlacementConfig(objectId: objectId, cellW: w, cellH: h, yOffset: yOffset)
     }
 

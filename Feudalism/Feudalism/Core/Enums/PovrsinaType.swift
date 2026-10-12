@@ -2,37 +2,84 @@
 //  PovrsinaType.swift
 //  Feudalism
 //
-//  Tip površine ćelije mape – označen slovom (G, W, P, D, …). Default G = zemlja.
+//  Teren ćelije mape – označen slovom. Default G = poluplodna zemlja.
+//  Novi tereni se dodaju ovdje (slovo, ime, kretanje, gradnja, plodnost).
 //
 
 import Foundation
 
-/// Tip površine jedne ćelije (zemlja, voda, ravnica, pustinja, …). Slovo = kratka oznaka za serializaciju/UI.
+/// Teren jedne ćelije. Slovo = kratka oznaka za datoteku mape i UI.
 enum PovrsinaType: String, Codable, CaseIterable, Identifiable {
-    case zemlja = "G"   // obična zemlja (default)
-    case voda = "W"
-    case ravnica = "P"
     case pustinja = "D"
-    case suma = "F"     // šuma
-    case stijena = "S"
+    case poluplodna = "G"
+    case plodna = "F"
+    case trava = "T"
+    case voda = "W"
+    case more = "M"
+    case put = "R"
+    case kamen = "S"
+    case mocvara = "B"
 
     var id: String { rawValue }
 
-    /// Jednoslovna ili dvoslovna oznaka (G, W, P, D, F, S).
     var letterCode: String { rawValue }
 
-    /// Ime za prikaz u UI.
     var displayName: String {
         switch self {
-        case .zemlja: return "Zemlja"
-        case .voda: return "Voda"
-        case .ravnica: return "Ravnica"
         case .pustinja: return "Pustinja"
-        case .suma: return "Šuma"
-        case .stijena: return "Stijena"
+        case .poluplodna: return "Poluplodna zemlja"
+        case .plodna: return "Plodna zemlja"
+        case .trava: return "Trava"
+        case .voda: return "Voda"
+        case .more: return "More"
+        case .put: return "Put"
+        case .kamen: return "Kamen / stijena"
+        case .mocvara: return "Močvara"
         }
     }
 
-    /// Zadana površina pri kreiranju nove ćelije (G = zemlja).
-    static var `default`: PovrsinaType { .zemlja }
+    /// Standardni indeks kretanja: 1 = normalno, 0 = neprohodno, veće od 1 = brže.
+    var defaultMovementIndex: Double {
+        switch self {
+        case .put: return 1.5
+        case .poluplodna, .plodna, .trava: return 1
+        case .pustinja: return 0.8
+        case .kamen: return 0.6
+        case .mocvara: return 0.4
+        case .voda, .more: return 0
+        }
+    }
+
+    var isBuildable: Bool {
+        switch self {
+        case .voda, .more, .mocvara: return false
+        case .pustinja, .poluplodna, .plodna, .trava, .put, .kamen: return true
+        }
+    }
+
+    var isWalkable: Bool { defaultMovementIndex > 0 }
+
+    /// Plodnost za farme: 0 = ništa ne raste, 1 = najbolje.
+    var fertility: Double {
+        switch self {
+        case .plodna: return 1
+        case .poluplodna: return 0.6
+        case .trava: return 0
+        case .mocvara: return 0.3
+        case .pustinja: return 0.1
+        case .voda, .more, .put, .kamen: return 0
+        }
+    }
+
+    static var `default`: PovrsinaType { .poluplodna }
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        if let value = PovrsinaType(rawValue: raw) {
+            self = value
+        } else {
+            // Stare mape: P = ravnica.
+            self = .poluplodna
+        }
+    }
 }

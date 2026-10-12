@@ -53,6 +53,14 @@ extension ObjectCategory {
             ]
         case .resursi:
             return [
+                Tree.gameObject,
+                Oak.gameObject,
+                Fir.gameObject,
+                Cypress.gameObject,
+                Palm.gameObject,
+                SmallRock.gameObject,
+                MediumRock.gameObject,
+                LargeRock.gameObject,
                 GameObject(name: "Zlato", category: .resursi),
                 GameObject(name: "Drvo", category: .resursi),
                 GameObject(name: "Kamen", category: .resursi)
@@ -63,6 +71,13 @@ extension ObjectCategory {
                 Windmill.gameObject,
                 Bakery.gameObject,
                 Granary.gameObject,
+                Brewery.gameObject,
+                Distillery.gameObject,
+                WineCellar.gameObject,
+                Tavern.gameObject,
+                Smocnica.gameObject,
+                Canteen.gameObject,
+                CandleShop.gameObject,
                 GameObject(name: "Pšenica", category: .hrana),
                 GameObject(name: "Povrće", category: .hrana)
             ]
@@ -71,11 +86,26 @@ extension ObjectCategory {
                 Farm.gameObject,
                 Chicken.gameObject,
                 Corn.gameObject,
-                GameObject(name: "Farma", category: .farme, width: 4, height: 4),
-                GameObject(name: "Polje", category: .farme, width: 2, height: 2)
+                Hop.gameObject,
+                Hive.gameObject,
+                Vegetables.gameObject,
+                Grapes.gameObject,
+                Spices.gameObject,
+                Flower.gameObject,
+                AppleOrchard.gameObject,
+                Pig.gameObject,
+                Cow.gameObject,
+                Sheep.gameObject,
             ]
         case .vojska:
             return [
+                Sword.gameObject,
+                Shield.gameObject,
+                Bow.gameObject,
+                Spear.gameObject,
+                Leather.gameObject,
+                Training.gameObject,
+                Armory.gameObject,
                 GameObject(name: "Baraka", category: .vojska, width: 4, height: 3),
                 GameObject(name: "Zidine", category: .vojska, width: 1, height: 1)
             ]
@@ -90,10 +120,18 @@ extension ObjectCategory {
                 Steps.gameObject,
                 House.gameObject,
                 Well.gameObject,
+                Spring.gameObject,
                 Hotel.gameObject,
+                Market.gameObject,
+                Stable.gameObject,
+                Gates.gameObject,
+                Miners.gameObject,
+                Engineering.gameObject,
+                Pharmacy.gameObject,
+                Greenhouse.gameObject,
+                Church.gameObject,
+                Diplomacy.gameObject,
                 GameObject(name: "Kula", category: .dvorac, width: 3, height: 3),
-                GameObject(name: "Kuća", category: .dvorac, width: 4, height: 4), // basic 4×4
-                Market.gameObject
             ]
         case .vojnici:
             return [
@@ -109,15 +147,37 @@ extension ObjectCategory {
         case .industrija:
             return [
                 Industry.gameObject,
+                Lager.gameObject,
+                Wood.gameObject,
+                Carriage.gameObject,
                 Iron.gameObject,
                 Stone.gameObject
+            ]
+        case .infrastruktura:
+            return [
+                Road.gameObject,
+                StoneSlab.gameObject,
+                Bridge.gameObject,
+                Tunnel.gameObject,
+                Flag.gameObject,
+                Torch.gameObject,
+                Monument.gameObject,
+                Candle.gameObject,
+                OrnamentalTree.gameObject,
+                Fountain.gameObject,
+                Roof.gameObject,
+            ]
+        case .podzemlje:
+            return [
+                UndergroundEntrance.gameObject,
+                UndergroundCorridor.gameObject,
+                Smocnica.gameObject,
+                Lager.gameObject
             ]
         case .ostali:
             return [
                 HugeWall.gameObject,
                 SmallWall.gameObject,
-                GameObject(name: "Cesta", category: .ostali),
-                GameObject(name: "Most", category: .ostali, width: 2, height: 1)
             ]
         }
     }

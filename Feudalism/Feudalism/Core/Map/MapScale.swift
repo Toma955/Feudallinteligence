@@ -3,10 +3,10 @@
 //  Feudalism
 //
 //  Jedan izvor istine za prostor na mapi:
-//  - Najmanja prostorna jedinica je 10×10 world jedinica (SpatialUnit10).
-//  - Sve mape su kockaste i građene od tih jedinica: 200×200 = 200 jedinica po strani.
-//  - Pravilo za gradnju: 1 ćelija za postavljanje = 40×40 = 4×4 minimalnih jedinica.
-//  - Mreže 10×10 i 40×40 u Map Editoru su samo pravila prikaza (koja mreža se crta).
+//  - 1 world jedinica = 1 metar.
+//  - Mapa 200×200 = 200×200 metara (200 ćelija po strani).
+//  - 1 ćelija za postavljanje = 1×1 metar. Građevina 4×4×4 zauzima 4×4×4 metra.
+//  - Mreže 10×10 i 40×40 u Map Editoru su linije svakih 10 m i 40 m.
 //
 //  Što svaka minimalna prostorna jedinica (10×10) mora imati (nepromjenjivo):
 //  - id, x (koordinata), y (koordinata)
@@ -21,7 +21,7 @@
 import Foundation
 import CoreGraphics
 
-/// Pravila prostora i dimenzija – minimalna jedinica 10×10, od nje se rade sve mape.
+/// Pravila prostora i dimenzija. 1 world jedinica = 1 metar.
 enum MapScale {
     // MARK: - Ishodište mape (0, 0)
     /// World X ishodišta mape – uvijek 0.0; mreže i sadržaj pozicioniraju se relativno na to.
@@ -29,47 +29,56 @@ enum MapScale {
     /// World Z ishodišta mape (y u ravnini XZ) – uvijek 0.0; mreže i sadržaj pozicioniraju se relativno na to.
     static let mapOriginWorldZ: CGFloat = 0
 
-    // MARK: - Najmanja prostorna jedinica (izvor svega)
-    /// Najmanja prostorna jedinica na mapi: 10×10 world jedinica. Sve mape su višekratnici ove jedinice.
-    static let smallSpatialUnitWorldUnits: CGFloat = 10
+    // MARK: - Metar
+    /// 1 world jedinica = 1 metar. Mapa, građevine i visine koriste ovu skalu.
+    static let metersPerWorldUnit: CGFloat = 1
 
-    /// Koliko minimalnih jedinica (10×10) čini jednu stranu ćelije za gradnju (40×40). 4×4 = 16 jedinica po ćeliji.
-    static let smallCellsPerObjectCubeSide: Int = 4
+    /// Najmanja prostorna jedinica: 1×1 metar.
+    static let smallSpatialUnitWorldUnits: CGFloat = 1
 
-    /// Pravilo za gradnju: 1 logička ćelija (postavljanje, zid) = 40×40 world = 4×4 minimalnih jedinica.
-    static var objectCubeWorldUnits: CGFloat {
-        smallSpatialUnitWorldUnits * CGFloat(smallCellsPerObjectCubeSide)
-    }
+    /// Jedna ćelija za gradnju = 1 metar. Nema dodatnog množenja.
+    static let smallCellsPerObjectCubeSide: Int = 1
 
-    /// 10 prostornih kocki čini jedinicu dimenzije mape (mapa side = broj minimalnih jedinica po strani).
+    /// 1 ćelija za postavljanje i zid = 1×1 metar.
+    static var objectCubeWorldUnits: CGFloat { metersPerWorldUnit }
+
+    /// Pretvori metre u world jedinice.
+    static func meters(_ value: Int) -> CGFloat { CGFloat(value) * metersPerWorldUnit }
+
+    /// Editor: linija mreže svakih 10 metara.
+    static let gridStep10Meters: CGFloat = 10
+    /// Editor: linija mreže svakih 40 metara.
+    static let gridStep40Meters: CGFloat = 40
+
+    /// 10 prostornih kocki čini jedinicu dimenzije mape (mapa side = broj metara po strani).
     static let objectCubesPerMapDimensionUnit: Int = 10
 
-    // MARK: - Izvedene veličine (ćelija = 40×40, ne 10×10)
-    /// 1 logička ćelija mape (za gradnju) = 40×40 world jedinica. Preset 200×200 = 200×200 takvih ćelija.
-    static var worldUnitsPerMapCell: CGFloat { objectCubeWorldUnits }
+    // MARK: - Izvedene veličine (ćelija = 1×1 metar)
+    /// 1 logička ćelija mape = 1×1 metar. Preset 200×200 = 200×200 metara.
+    static var worldUnitsPerMapCell: CGFloat { metersPerWorldUnit }
 
-    /// Elevacija terena: 1 prostorna kockica (10×10) = 10 world jedinica u visinu. Podigni za 5 = +50, za 10 = +100 (točno 5 odnosno 10 prostornih kockica).
-    static var worldUnitsPerElevationStep: CGFloat { smallSpatialUnitWorldUnits }
+    /// Elevacija: 1 korak = 1 metar.
+    static var worldUnitsPerElevationStep: CGFloat { metersPerWorldUnit }
 
     /// Broj minimalnih jedinica po strani za dani preset (200, 400, …). To je „side” u MapDimension.
     static func smallUnitsPerSide(presetSide side: Int) -> Int { side }
 
-    /// Broj ćelija za gradnju (40×40) po strani kad mapa ima side minimalnih jedinica. 200 → 50.
+    /// Broj ćelija za gradnju po strani. 200 m → 200 ćelija.
     static func placementCellsPerSide(smallUnitsPerSide side: Int) -> Int {
         side / smallCellsPerObjectCubeSide
     }
 
-    /// World širina mape kad ima side minimalnih jedinica po strani: side × 10.
+    /// World širina mape kad ima side metara po strani.
     static func worldWidth(smallUnitsPerSide side: Int) -> CGFloat {
         CGFloat(side) * smallSpatialUnitWorldUnits
     }
 
-    /// World širina mape: cols ćelija × 40 world jedinica po ćeliji (ne 10).
+    /// World širina mape u metrima: cols ćelija × 1 m.
     static func worldWidth(cols: Int) -> CGFloat {
         CGFloat(cols) * worldUnitsPerMapCell
     }
 
-    /// World visina mape: rows ćelija × 40 world jedinica po ćeliji (ne 10).
+    /// World dubina mape u metrima: rows ćelija × 1 m.
     static func worldHeight(rows: Int) -> CGFloat {
         CGFloat(rows) * worldUnitsPerMapCell
     }

@@ -20,6 +20,8 @@ enum ObjectCategory: String, CaseIterable, Identifiable, Codable {
     case vojnici = "Vojnici"
     case radnici = "Radnici"
     case industrija = "Industrija"
+    case infrastruktura = "Infrastruktura"
+    case podzemlje = "Podzemlje"
     case ostali = "Ostali"
 
     var id: String { rawValue }
@@ -37,6 +39,8 @@ enum ObjectCategory: String, CaseIterable, Identifiable, Codable {
         case .vojnici: return "vojnici"
         case .radnici: return "radnici"
         case .industrija: return "industrija"
+        case .infrastruktura: return "infrastruktura"
+        case .podzemlje: return "podzemlje"
         case .ostali: return "ostali"
         }
     }
@@ -54,6 +58,8 @@ enum ObjectCategory: String, CaseIterable, Identifiable, Codable {
         case .vojnici: return Color(red: 0.6, green: 0.2, blue: 0.2)
         case .radnici: return .blue
         case .industrija: return Color(red: 0.5, green: 0.45, blue: 0.35)
+        case .infrastruktura: return Color(red: 0.52, green: 0.50, blue: 0.46)
+        case .podzemlje: return Color(red: 0.45, green: 0.38, blue: 0.32)
         case .ostali: return .secondary
         }
     }

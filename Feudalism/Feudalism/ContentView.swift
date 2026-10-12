@@ -1,15 +1,8 @@
-//
-//  ContentView.swift
-//  Feudalism
-//
-//  Glavni ekran – puni zaslon (karta preko cijelog ekrana), na dnu gumb dvora, HUD gore.
-//
-
 import SwiftUI
 import AppKit
 import CoreGraphics
+import UniformTypeIdentifiers
 
-/// Vraća novu sliku s bijelom/svijetlom pozadinom pretvorenom u potpuno transparentnu. Koristi NSBitmapImageRep.
 private func imageWithTransparentWhiteBackground(_ image: NSImage, whiteThreshold: UInt8 = 235) -> NSImage? {
     let width = Int(image.size.width)
     let height = Int(image.size.height)
@@ -57,30 +50,24 @@ private func imageWithTransparentWhiteBackground(_ image: NSImage, whiteThreshol
     return outImage
 }
 
-private func printIconDiagnostics() {
-    // Bez ispisa u produkciji
-}
+private func printIconDiagnostics() {}
 
-/// Učita ikonu resursa. Slike su već s transparentnom pozadinom – prikazujemo ih izravno.
 private func loadResourceIcon(named name: String) -> NSImage? {
     loadBarIcon(named: name)
 }
 
-/// Max prikazivani broj za resurse (novac do 999999; fiksna širina 6 znamenki – traka se ne mijenja).
-private let resourceMaxDisplay = 999_999
+private let resourceMaxDisplay = 9_999
 
-/// Širina za broj (6 znamenki: 999999).
-private let resourceDigitWidth: CGFloat = 56
+private let resourceDigitWidth: CGFloat = 46
+private let hudBarIcon: CGFloat = 48
 
-/// Jedan resurs u HUD-u: ikona + opcionalno broj. U solo modu samo ikona (bez natpisa).
 private struct ResourceRow: View {
     let iconName: String
     let value: Int
     var iconSize: CGFloat = 44
     var systemFallback: String = "cube.fill"
-    /// false = samo ikona (solo gameplay, bez broja).
     var iconOnly: Bool = false
-    private var image: NSImage? { loadResourceIcon(named: iconName) }
+    private var image: NSImage? { HUDIconTrim.image(named: iconName) }
     private var displayValue: Int { min(resourceMaxDisplay, max(0, value)) }
     var body: some View {
         HStack(spacing: iconOnly ? 0 : 4) {
@@ -91,17 +78,18 @@ private struct ResourceRow: View {
                         .scaledToFit()
                 } else {
                     Image(systemName: systemFallback)
-                        .font(.system(size: iconOnly ? iconSize * 0.7 : iconSize * 0.6))
+                        .font(.system(size: iconSize * 0.72, weight: .medium))
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(.white.opacity(0.95))
                 }
             }
             .frame(width: iconSize, height: iconSize)
+            .offset(y: iconName == "hop_resource" ? 8 : 0)
             if !iconOnly {
                 Text("\(displayValue)")
-                    .font(.system(size: 16, weight: .medium, design: .monospaced))
+                    .font(.system(size: 18, weight: .medium, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.95))
-                    .frame(width: resourceDigitWidth, alignment: .trailing)
+                    .frame(width: resourceDigitWidth, alignment: .leading)
             }
         }
         .frame(width: iconOnly ? iconSize : ResourceRow.fixedWidth(iconSize: iconSize))
@@ -109,86 +97,180 @@ private struct ResourceRow: View {
     static func fixedWidth(iconSize: CGFloat) -> CGFloat { iconSize + 4 + resourceDigitWidth }
 }
 
-/// Što prikazuje traka resursa: Resources = novci (zlato), drvo, kamen, željezo; Food = kruh, hmelj, žito.
+/// Resource PNG-ovi imaju velik prazan rub, pa isti okvir kao zlatnik izgleda sitno.
+/// Reže se prozirni rub da crtež ispuni isti kvadrat kao ikona novca.
+private enum HUDIconTrim {
+    private static var cache: [String: NSImage] = [:]
+
+    static func image(named name: String) -> NSImage? {
+        if let cached = cache[name] { return cached }
+        guard let source = loadResourceIcon(named: name) else { return nil }
+        let trimmed = croppedToOpaquePixels(source)
+        cache[name] = trimmed
+        return trimmed
+    }
+
+    private static func croppedToOpaquePixels(_ image: NSImage) -> NSImage {
+        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return image }
+        let width = cg.width
+        let height = cg.height
+        guard width > 0, height > 0 else { return image }
+        let bytesPerRow = width * 4
+        var pixels = [UInt8](repeating: 0, count: height * bytesPerRow)
+        guard let context = CGContext(
+            data: &pixels,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return image }
+        context.translateBy(x: 0, y: CGFloat(height))
+        context.scaleBy(x: 1, y: -1)
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        var minX = width
+        var minY = height
+        var maxX = -1
+        var maxY = -1
+        for y in 0..<height {
+            for x in 0..<width {
+                let alpha = pixels[(y * width + x) * 4 + 3]
+                if alpha > 16 {
+                    if x < minX { minX = x }
+                    if y < minY { minY = y }
+                    if x > maxX { maxX = x }
+                    if y > maxY { maxY = y }
+                }
+            }
+        }
+        guard maxX >= minX, maxY >= minY else { return image }
+        let pad = 6
+        let originX = max(0, minX - pad)
+        let originY = max(0, minY - pad)
+        let cropWidth = min(width - originX, maxX - minX + 1 + pad * 2)
+        let cropHeight = min(height - originY, maxY - minY + 1 + pad * 2)
+        let rect = CGRect(x: originX, y: originY, width: cropWidth, height: cropHeight)
+        guard let cropped = cg.cropping(to: rect) else { return image }
+        return NSImage(cgImage: cropped, size: NSSize(width: cropWidth, height: cropHeight))
+    }
+}
+
 private enum ResourceStripMode {
-    case resources  // zlato, drvo, kamen, željezo
-    case food       // kruh, hmelj, žito
+    case resources
+    case weapons
+    case food
 }
 
-/// Boja za postotak: 100 zeleno, 80–100 blago zeleno, 50–80 žuto, ispod 50 crveno; 0/0 tamnocrveno.
-private func colorForPercent(_ percent: Int, isEmpty: Bool) -> Color {
-    if isEmpty { return Color(red: 0.55, green: 0.15, blue: 0.12) }
-    switch percent {
-    case 100: return Color(red: 0.2, green: 0.75, blue: 0.3)
-    case 80..<100: return Color(red: 0.45, green: 0.75, blue: 0.4)
-    case 50..<80: return Color(red: 0.9, green: 0.75, blue: 0.2)
-    default: return Color(red: 0.85, green: 0.25, blue: 0.2)
-    }
-}
-
-/// HUD element: current/max (max 999/999) na sredini, vertikalna linija, postotak s bojom (0/0 = tamnocrveno).
-private struct HUDScoreView: View {
-    let current: Int
-    let max: Int
-
-    private static let viewWidth: CGFloat = 160
-    private static let height: CGFloat = 28
-    private static let cornerRadius: CGFloat = 6
-
-    private var currentClamped: Int { min(999, Swift.max(0, current)) }
-    private var maxClamped: Int { min(999, Swift.max(0, max)) }
-    private var percent: Int {
-        guard maxClamped > 0 else { return 0 }
-        return min(100, (currentClamped * 100) / maxClamped)
-    }
-    private var isEmpty: Bool { maxClamped == 0 }
+private struct MarkedPeopleBar: View {
+    let people: [MarkedPerson]
 
     var body: some View {
-        HStack(spacing: 0) {
-            Text("\(currentClamped)/\(maxClamped)")
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-
-            Rectangle()
-                .fill(.white.opacity(0.4))
-                .frame(width: 1, height: 14)
-
-            Text("\(percent)%")
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.white)
-                .frame(minWidth: 36)
-                .padding(.leading, 6)
+        HStack(spacing: 22) {
+            ForEach(people) { person in
+                VStack(spacing: 4) {
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 26))
+                        .foregroundStyle(color(hex: person.colorHex))
+                        .frame(width: 36, height: 36)
+                    Text(person.name)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.95))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .frame(maxWidth: 88)
+                }
+            }
         }
-        .padding(.trailing, 8)
-        .frame(width: Self.viewWidth, height: Self.height)
-        .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: Self.cornerRadius))
+        .padding(.horizontal, 16)
+    }
+
+    private func color(hex: String) -> Color {
+        var s = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6, let num = UInt64(s, radix: 16) else { return .white }
+        return Color(
+            red: Double((num >> 16) & 0xFF) / 255,
+            green: Double((num >> 8) & 0xFF) / 255,
+            blue: Double(num & 0xFF) / 255
+        )
     }
 }
 
-/// Donji bar: kategorija koja je otvorena (nil = sve ikone, inače island s pod-ikonama).
-private enum BottomBarCategory: String, CaseIterable {
-    case castle
-    case sword
-    case mine
-    case house
-    case cave
-    case farm
-    case food
-    case tools
+private struct PeopleCountView: View {
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 8) {
+            hudAssetIcon("people", fallback: "person.fill", size: 28)
+            Text("\(max(0, count))")
+                .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.95))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 40)
+        .background(Color(white: 0, opacity: 0.35), in: RoundedRectangle(cornerRadius: 8))
+        .help("Ljudi")
+    }
 }
 
-/// Godišnja doba za HUD – ikone spring.png, summer.png, attun.png, winter.png. Redoslijed: zima → proljeće → ljeto → jesen → zima (nova godina).
+private struct GoldHouseView: View {
+    let amount: Int
+    let happiness: Int
+
+    private var shown: Int { max(0, amount) }
+    private var shownHappiness: Int { min(100, max(0, happiness)) }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            hudAssetIcon("gold", fallback: "dollarsign.circle.fill", size: hudBarIcon)
+            Text("\(shown)")
+                .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.95))
+                .lineLimit(1)
+                .fixedSize()
+            Rectangle()
+                .fill(.white.opacity(0.35))
+                .frame(width: 1, height: 28)
+            hudAssetIcon("happy", fallback: "face.smiling", size: 28)
+            Text("\(shownHappiness) %")
+                .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.95))
+                .lineLimit(1)
+                .fixedSize()
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 48)
+        .background(Color(white: 0, opacity: 0.35), in: RoundedRectangle(cornerRadius: 8))
+        .help("Zlato i sreća. Sreća počinje na 100 %.")
+    }
+}
+
+private func hudAssetIcon(_ name: String, fallback: String, size: CGFloat) -> some View {
+    Group {
+        if let img = loadBarIcon(named: name) {
+            Image(nsImage: img)
+                .resizable()
+                .scaledToFit()
+        } else {
+            Image(systemName: fallback)
+                .font(.system(size: size * 0.7))
+                .foregroundStyle(.white.opacity(0.95))
+        }
+    }
+    .frame(width: size, height: size)
+}
+
 private enum SeasonIcon: String, CaseIterable {
     case spring = "spring"
     case summer = "summer"
     case attun = "attun"
     case winter = "winter"
 
-    /// Redoslijed u godini: zima, proljeće, ljeto, jesen.
     private static let cycle: [SeasonIcon] = [.winter, .spring, .summer, .attun]
 
-    /// Sljedeće doba; kad attun → winter, jedna godina je prošla.
     static func next(after s: SeasonIcon) -> (season: SeasonIcon, yearCompleted: Bool) {
         guard let idx = cycle.firstIndex(of: s) else { return (.winter, false) }
         let nextIdx = (idx + 1) % cycle.count
@@ -197,51 +279,42 @@ private enum SeasonIcon: String, CaseIterable {
         return (nextSeason, yearCompleted)
     }
 
-    /// Doba i godina iz proteklih sekundi od početka igre (60 s = 1 doba, 240 s = 1 godina).
     static func fromElapsedSeconds(_ totalSeconds: Int) -> (season: SeasonIcon, yearOffset: Int) {
-        let seasonIndex = (totalSeconds / 60) % cycle.count
-        let yearOffset = totalSeconds / 240
+        let perSeason = Season.turnsPerSeason
+        let seasonIndex = (totalSeconds / perSeason) % cycle.count
+        let yearOffset = totalSeconds / (perSeason * cycle.count)
         return (cycle[seasonIndex], yearOffset)
     }
 }
 
-/// Širina područja sadržaja (za ograničavanje max širine donjeg bara).
 private struct ContentAreaWidthKey: PreferenceKey {
     static var defaultValue: CGFloat = 830
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
-/// Minimalna širina donjeg bara – uvijek ostaje ta širina; ne smije biti manja ni kad je pretinac prazan.
-private let bottomBarMinWidth: CGFloat = 620
-/// Kad je pretinac otvoren, bar se minimalno poveća da sadržaj lijepo stane (ne od ruba do ruba).
-private let bottomBarExpandedMinWidth: CGFloat = 720
-
 struct ContentView: View {
     @EnvironmentObject private var gameState: GameState
+    @ObservedObject private var performance = PerformanceMonitor.shared
     @State private var showMinijatureWall = false
+    @State private var showMinimap = false
+    @State private var performanceOffset = CGSize(width: 0, height: -196)
+    @State private var performanceDragOrigin = CGSize(width: 0, height: -196)
     @State private var expandedBottomCategory: BottomBarCategory? = nil
-    /// Smjer tranzicije proširenog sadržaja: true = novi dolazi s desne, stari ide ulijevo; false = obrnuto.
-    @State private var bottomBarTransitionFromRight: Bool = true
+    @State private var hudMouseNear = false
     @State private var contentAreaWidth: CGFloat = 830
     @State private var showGrid = false
     @State private var showPivotIndicator = false
-    @State private var showSettingsPopover = false
-    @StateObject private var placementConsole = PlacementDebugConsole.shared
-    /// resources = drvo, kamen, željezo; food = kruh, hmelj, žito
+    @State private var showPauseMenu = false
+    @State private var pauseMessage: String?
+    @State private var pausedAt: Date?
     @State private var resourceStripMode: ResourceStripMode = .resources
-    /// HUD ispis 0/0 i postotak – mijenjaju se iz logike (npr. populacija / kapacitet).
-    @State private var hudScoreCurrent: Int = 0
-    @State private var hudScoreMax: Int = 0
-    /// Trenutno godišnje doba za HUD; počinje zima.
     @State private var displayedSeason: SeasonIcon = .winter
-    /// Godina u HUD-u; +1 nakon svakog ciklusa 4 doba.
     @State private var displayedYear: Int = 1100
-    /// Ikona koja upravo odlazi (animacija prema dolje); nil kad nema prijelaza.
     @State private var outgoingSeason: SeasonIcon?
-    /// Offset za odlazeću ikonu (0 → 36); za dolaznu -36 → 0.
     @State private var seasonAnimOffset: CGFloat = 0
-    /// Početak igre – sat ovisi samo o ovom; neprestano broji od ovog trenutka.
     @State private var gameStartTime: Date?
+    @State private var showTreasury = false
+    @State private var showDiplomacy = false
 
     var body: some View {
         MapScreenLayout(
@@ -249,49 +322,93 @@ struct ContentView: View {
             content: {
                 ZStack {
                     SceneKitMapView(showGrid: showGrid, handPanMode: .constant(false), showPivotIndicator: showPivotIndicator)
+                        .id(gameState.mapSceneEpoch)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .ignoresSafeArea()
+                    if !gameState.isMapEditorMode, let objectId = gameState.selectedPlacementObjectId {
+                        priceTag(objectId: objectId)
+                    }
+
+                    if !gameState.isMapEditorMode, showTreasury || showDiplomacy {
+                        VStack(alignment: .trailing, spacing: 10) {
+                            if showTreasury, gameState.campaign.type == .economic {
+                                TreasuryPanel { showTreasury = false }
+                            }
+                            if showDiplomacy {
+                                DiplomacyPanel { showDiplomacy = false }
+                            }
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .padding(.top, 12)
+                        .padding(.trailing, 16)
+                    }
+
+                    if let result = gameState.campaignResult, !gameState.isMapEditorMode, !gameState.isSandboxPlay {
+                        CampaignResultOverlay(result: result)
+                    }
+
+                    if let notice = gameState.factionDefeatNotice {
+                        VStack {
+                            Text(notice)
+                                .font(.custom("Georgia", size: 18))
+                                .foregroundStyle(.white)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 18)
+                                .padding(.vertical, 10)
+                                .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
+                                .padding(.top, 12)
+                            Spacer()
+                        }
+                        .allowsHitTesting(false)
+                    }
 
                     VStack(spacing: 0) {
                         Spacer()
-                        // Jedan objekt koji naraste prema gore; ikone dole pri dnu, sadržaj gore
                         HStack(spacing: 0) {
-                            Spacer(minLength: 0)
+                            bottomBarSideSlot(showsMap: true)
                             VStack(spacing: 0) {
-                                if let category = expandedBottomCategory {
-                                    expandedBottomBarContent(category: category)
-                                        .padding(.horizontal, 20)
-                                        .padding(.top, 16)
-                                        .padding(.bottom, 10)
-                                        .transition(.asymmetric(
-                                            insertion: .move(edge: bottomBarTransitionFromRight ? .trailing : .leading),
-                                            removal: .move(edge: bottomBarTransitionFromRight ? .leading : .trailing)
-                                        ))
+                                if bottomBarShowsPeople {
+                                    MarkedPeopleBar(people: gameState.markedPeople)
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                        .transition(.opacity)
+                                } else if let placementId = gameState.inspectedPlacementId, let title = gameState.inspectedBuildingTitle {
+                                    BuildingStatusView(placementId: placementId, title: title)
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                } else if let title = gameState.inspectedBuildingTitle {
+                                    Text(title)
+                                        .font(.custom("Georgia", size: 22))
+                                        .foregroundStyle(.white.opacity(0.95))
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                } else {
+                                    if let category = expandedBottomCategory {
+                                        expandedBottomBarContent(category: category)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.horizontal, 16)
+                                            .padding(.top, 12)
+                                            .padding(.bottom, 8)
+                                            .transition(.opacity)
+                                    }
+                                    Spacer(minLength: 0)
+                                    bottomBarStrip
+                                        .padding(.horizontal, expandedBottomCategory != nil ? 36 : 48)
+                                        .padding(.vertical, expandedBottomCategory != nil ? 10 : 16)
+                                        .padding(.bottom, expandedBottomCategory != nil ? 12 : 2)
                                 }
-                                Spacer(minLength: 0)
-                                bottomBarStrip
-                                    .padding(.horizontal, expandedBottomCategory != nil ? 20 : 28)
-                                    .padding(.vertical, expandedBottomCategory != nil ? 10 : 14)
-                                    .padding(.bottom, expandedBottomCategory != nil ? 10 : 0)
                             }
-                            .clipped()
                             .animation(.easeInOut(duration: 0.28), value: expandedBottomCategory)
-                            .frame(
-                                minWidth: expandedBottomCategory != nil ? bottomBarExpandedMinWidth : bottomBarMinWidth,
-                                minHeight: expandedBottomCategory != nil ? 180 : 80,
-                                maxHeight: expandedBottomCategory != nil ? 180 : 80
-                            )
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
-                            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.25), lineWidth: 1))
-                            .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 4)
-                            .frame(
-                                minWidth: expandedBottomCategory != nil ? bottomBarExpandedMinWidth : bottomBarMinWidth,
-                                maxWidth: min(830, contentAreaWidth * 0.92)
-                            )
-                            Spacer(minLength: 0)
+                            .animation(.easeInOut(duration: 0.22), value: bottomBarShowsPeople)
+                            .animation(.easeInOut(duration: 0.3), value: gameState.isUndergroundView)
+                            .frame(width: bottomBarWidth, height: bottomBarPanelHeight)
+                            .background { BottomBarIslandChrome(corner: 26) }
+                            .clipShape(RoundedRectangle(cornerRadius: 26))
+                            .shadow(color: .black.opacity(0.3 * gameState.bottomBarOpacity), radius: 10, x: 0, y: 4)
+                            .layoutPriority(1)
+                            bottomBarSideSlot(showsMap: false)
                         }
-                        .padding(.bottom, expandedBottomCategory != nil ? 88 : 20)
+                        .padding(.bottom, bottomBarCategoryOpen ? 72 : 28)
                         .animation(.easeInOut(duration: 0.28), value: expandedBottomCategory)
+                        .animation(.easeInOut(duration: 0.22), value: bottomBarShowsPeople)
                     }
                 }
                 .background(
@@ -307,25 +424,74 @@ struct ContentView: View {
                     if showMinijatureWall {
                         minijatureWallOverlay
                     }
+                    if gameState.showLogPanel {
+                        logPanelOverlay
+                    }
+                    if gameState.showFPS {
+                        performancePanelOverlay
+                    }
                 }
             }
         )
+        .overlay {
+            if showPauseMenu {
+                pauseMenuOverlay
+            }
+        }
+        .onChange(of: expandedBottomCategory) { category in
+            if category == .cave {
+                gameState.enterUnderground()
+            } else {
+                gameState.leaveUnderground()
+            }
+        }
+        .onChange(of: gameState.isUndergroundView) { underground in
+            if underground, expandedBottomCategory != .cave {
+                expandedBottomCategory = .cave
+            } else if !underground, expandedBottomCategory == .cave {
+                expandedBottomCategory = nil
+            }
+        }
+        .onChange(of: gameState.inspectedBuildingTitle) { title in
+            if title != nil { expandedBottomCategory = nil }
+        }
+        .onChange(of: gameState.isGamePaused) { paused in
+            if paused {
+                pausedAt = Date()
+            } else if let began = pausedAt, let start = gameStartTime {
+                gameStartTime = start.addingTimeInterval(Date().timeIntervalSince(began))
+                pausedAt = nil
+            }
+        }
         .onChange(of: gameState.isLevelReady) { ready in
             if ready {
                 gameStartTime = Date()
-                AudioManager.shared.playMapMusicIfAvailable(volume: gameState.audioMusicVolume)
+                gameState.focusSoloCameraOnCenter()
+                gameState.spawnRealmSeatsIfNeeded(animated: true)
+                gameState.beginMatchClock()
+                AudioManager.shared.playMapMusicIfAvailable(volume: gameState.effectiveMusicVolume)
             } else {
                 gameStartTime = nil
                 AudioManager.shared.stopMapMusic()
             }
         }
-        .onChange(of: gameState.audioMusicVolume) { vol in
-            AudioManager.shared.updateMapMusicVolume(volume: vol)
+        .onChange(of: gameState.audioMusicVolume) { _ in
+            AudioManager.shared.updateMapMusicVolume(volume: gameState.effectiveMusicVolume)
         }
-        .onAppear { printIconDiagnostics() }
+        .onChange(of: gameState.audioMuted) { _ in
+            AudioManager.shared.updateMapMusicVolume(volume: gameState.effectiveMusicVolume)
+        }
+        .onChange(of: gameState.showFPS) { show in
+            if show { performance.start() } else { performance.stop() }
+        }
+        .onAppear {
+            printIconDiagnostics()
+            if gameState.showFPS { performance.start() }
+        }
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
-            guard let start = gameStartTime, gameState.isLevelReady, !gameState.isShowingMainMenu, !gameState.isMapEditorMode else { return }
-            let totalSeconds = Int(Date().timeIntervalSince(start))
+            guard gameState.isLevelReady, !gameState.isShowingMainMenu, !gameState.isMapEditorMode, !gameState.isGamePaused else { return }
+            guard gameStartTime != nil else { return }
+            let totalSeconds = max(0, gameState.currentTurn - 1)
             let (newSeason, yearOffset) = SeasonIcon.fromElapsedSeconds(totalSeconds)
             let newYear = 1100 + yearOffset
             if newSeason != displayedSeason {
@@ -336,7 +502,6 @@ struct ContentView: View {
         }
     }
 
-    /// Primijeni novo doba i godinu (iz sata) s animacijom.
     private func applySeasonChange(to newSeason: SeasonIcon, year newYear: Int) {
         let leaving = displayedSeason
         outgoingSeason = leaving
@@ -352,7 +517,38 @@ struct ContentView: View {
         }
     }
 
-    /// Sam traka s ikonama – smanjene kad je pretinac otvoren. Sadržaj se prikazuje iznad (island prema gore).
+    private var bottomBarShowsPeople: Bool { !gameState.markedPeople.isEmpty }
+
+    private var bottomBarArea: CGFloat { CGFloat(gameState.bottomBarAreaScale) }
+    private var bottomBarIcon: CGFloat { CGFloat(gameState.bottomBarIconScale) }
+
+    /// Širina koja stane sve ikone, pa se bar širi do toga da budu ravnomjerno raspoređene.
+    private var bottomBarFitWidth: CGFloat {
+        let icon = (bottomBarCategoryOpen ? 34 : 46) * bottomBarIcon
+        let count = CGFloat(BottomBarCategory.allCases.count)
+        let inset: CGFloat = bottomBarCategoryOpen ? 88 : 112
+        return count * icon + inset
+    }
+
+    private var bottomBarWidth: CGFloat {
+        let desired = (bottomBarCategoryOpen ? 1280 : 1120) * bottomBarArea
+        let limit = max(bottomBarFitWidth, contentAreaWidth - 72)
+        return min(max(bottomBarFitWidth, desired), limit)
+    }
+
+    /// Otvorena kategorija ili pregled građevine (stanje, trening) trebaju viši bar.
+    private var bottomBarPanelHeight: CGFloat {
+        let base: CGFloat
+        if bottomBarCategoryOpen { base = 196 }
+        else if !bottomBarShowsPeople, gameState.inspectedPlacementId != nil { base = 196 }
+        else { base = 104 }
+        return base * bottomBarArea
+    }
+
+    private var bottomBarCategoryOpen: Bool {
+        !bottomBarShowsPeople && gameState.inspectedBuildingTitle == nil && expandedBottomCategory != nil
+    }
+
     private var bottomBarStrip: some View {
         barIconsRow(
             compact: expandedBottomCategory != nil,
@@ -360,11 +556,9 @@ struct ContentView: View {
         )
     }
 
-    /// Red ikona: compact = smanjene (kad je prošireno), inače normalne. Klik na istu ikonu kao trenutno otvorenu vraća početno.
     private func barIconsRow(compact: Bool, expandedCategory: BottomBarCategory?) -> some View {
-        let iconSize: CGFloat = compact ? 32 : 48
-        let foodIconSize: CGFloat = compact ? 36 : 56
-        return HStack(spacing: compact ? 12 : 24) {
+        let iconSize: CGFloat = (compact ? 34 : 46) * bottomBarIcon
+        return HStack(spacing: 0) {
             ForEach(BottomBarCategory.allCases, id: \.self) { cat in
                 Button {
                     withAnimation(.easeInOut(duration: 0.28)) {
@@ -372,19 +566,19 @@ struct ContentView: View {
                             expandedBottomCategory = nil
                         } else {
                             if expandedCategory != nil, gameState.playBarTransitionSound {
-                                AudioManager.shared.playSound(named: "transition", volume: gameState.audioSoundsVolume)
+                                AudioManager.shared.playSound(named: "transition", volume: gameState.effectiveSoundsVolume)
                             }
-                            let order = BottomBarCategory.allCases
-                            let oldIdx = expandedCategory.flatMap { order.firstIndex(of: $0) }
-                            let newIdx = order.firstIndex(of: cat) ?? 0
-                            bottomBarTransitionFromRight = (newIdx > (oldIdx ?? -1))
                             expandedBottomCategory = cat
                         }
                     }
                 } label: {
-                    let size = cat == .food ? foodIconSize : iconSize
-                    barIcon(for: cat, size: size)
-                        .offset(y: cat == .food ? -4 : 0)
+                    barIcon(for: cat, size: iconSize)
+                        .frame(maxWidth: .infinity, minHeight: iconSize)
+                        .padding(.vertical, 2)
+                        .background(
+                            cat == .cave && gameState.isUndergroundView ? Color.white.opacity(0.2) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 10)
+                        )
                 }
                 .buttonStyle(.plain)
             }
@@ -392,133 +586,43 @@ struct ContentView: View {
     }
 
     private func barIcon(for category: BottomBarCategory, size: CGFloat = 48) -> some View {
-        let icon: BarIconView = {
-            switch category {
-            case .castle: return BarIconView(assetName: "castle", systemName: "building.columns.fill", size: size)
-            case .sword: return BarIconView(assetName: "sword", systemName: "crossed.swords", size: size)
-            case .mine: return BarIconView(assetName: "mine", systemName: "hammer.fill", size: size)
-            case .house: return BarIconView(assetName: "house", systemName: "house.fill", size: size)
-            case .cave: return BarIconView(assetName: "cave", systemName: "mountain.2.fill", size: size)
-            case .farm: return BarIconView(assetName: "farm", systemName: "leaf.fill", size: size)
-            case .food: return BarIconView(assetName: "food", systemName: "fork.knife", size: size)
-            case .tools: return BarIconView(assetName: "tools", systemName: "wrench.and.screwdriver.fill", size: size)
-            }
-        }()
-        return icon
+        BuildCategoryIcon(category: category, size: size)
     }
 
-    /// Sadržaj proširenog pretinca – minimalno povećan da sve lijepo stane, ne od ruba do ruba.
     private func expandedBottomBarContent(category: BottomBarCategory) -> some View {
-        Group {
-            switch category {
-            case .castle:
-                CastleButtonExpandedView(
-                    onSelectWall: {
-                        placementDebugLog("UI click castle/huge_wall -> \(HugeWall.objectId)")
-                        gameState.selectedPlacementObjectId = HugeWall.objectId
-                    },
-                    onSelectSmallWall: {
-                        placementDebugLog("UI click castle/wall_small -> \(SmallWall.objectId)")
-                        gameState.selectedPlacementObjectId = SmallWall.objectId
-                    },
-                    onSelectMarket: {
-                        placementDebugLog("UI click castle/market -> \(Market.objectId)")
-                        gameState.selectedPlacementObjectId = Market.objectId
-                    },
-                    onSelectArmory: { /* dvor – uskoro */ },
-                    onSelectSteps: {
-                        let targetId = gameState.isSoloMode ? Steps.objectId : HugeWall.objectId
-                        placementDebugLog("UI click castle/steps -> \(targetId)")
-                        gameState.selectedPlacementObjectId = targetId
-                    },
-                    onSelectStairs: {
-                        let targetId = gameState.isSoloMode ? Steps.objectId : HugeWall.objectId
-                        placementDebugLog("UI click castle/stairs -> \(targetId)")
-                        gameState.selectedPlacementObjectId = targetId
-                    },
-                    onSelectTraining: { /* dvor – uskoro */ },
-                    onSelectGates: { /* dvor – uskoro */ },
-                    onSelectStable: { /* dvor – uskoro */ },
-                    onSelectMiners: { /* dvor – uskoro */ },
-                    onSelectEngineering: { /* dvor – uskoro */ },
-                    onSelectTowers: { /* dvor – uskoro */ },
-                    onSelectDrawbridge: { /* dvor – uskoro */ }
-                )
-            case .farm:
-                FarmButtonExpandedView(
-                    onSelectAppleFarm: { /* objekt – uskoro */ },
-                    onSelectPigFarm: { /* objekt – uskoro */ },
-                    onSelectHayFarm: { /* objekt – uskoro */ },
-                    onSelectCowFarm: { /* objekt – uskoro */ },
-                    onSelectSheepFarm: { /* objekt – uskoro */ },
-                    onSelectWheatFarm: { /* objekt – uskoro */ },
-                    onSelectCornFarm: { gameState.selectedPlacementObjectId = Corn.objectId },
-                    onSelectChickenFarm: { gameState.selectedPlacementObjectId = Chicken.objectId },
-                    onSelectVegetablesFarm: { /* objekt – uskoro */ },
-                    onSelectGrapesFarm: { /* objekt – uskoro */ },
-                    onSelectSpicesFarm: { /* objekt – uskoro */ },
-                    onSelectFlowerFarm: { /* objekt – uskoro */ }
-                )
-            case .sword:
-                SwordButtonExpandedView(
-                    onSelectSwordHouse: { /* oružje – uskoro */ },
-                    onSelectShield: { /* oružje – uskoro */ },
-                    onSelectBow: { /* oružje – uskoro */ },
-                    onSelectSpear: { /* oružje – uskoro */ },
-                    onSelectLeather: { /* oružje – uskoro */ }
-                )
-            case .mine:
-                MineButtonExpandedView(
-                    onSelectLager: { /* industrija – uskoro */ },
-                    onSelectStump: { /* industrija – uskoro */ },
-                    onSelectIronMine: { gameState.selectedPlacementObjectId = Iron.objectId },
-                    onSelectStoneMine: { gameState.selectedPlacementObjectId = Stone.objectId },
-                    onSelectCarriage: { /* industrija – uskoro */ }
-                )
-            case .tools:
-                ToolsButtonExpandedView(
-                    selectedToolId: $gameState.selectedToolsPanelItem,
-                    onSelectSword: { gameState.selectedToolsPanelItem = "sword" },
-                    onSelectMace: { gameState.selectedToolsPanelItem = "mace" },
-                    onSelectReport: { gameState.selectedToolsPanelItem = "report" },
-                    onSelectShovel: { gameState.selectedToolsPanelItem = "shovel" },
-                    onSelectPen: { gameState.selectedToolsPanelItem = "pen" }
-                )
-            case .house:
-                HouseButtonExpandedView(
-                    onSelectHouse: { /* kuća – uskoro */ },
-                    onSelectPharmacy: { /* kuća – uskoro */ },
-                    onSelectGreenHouse: { /* kuća – uskoro */ },
-                    onSelectHotel: { gameState.selectedPlacementObjectId = Hotel.objectId },
-                    onSelectWaterWell: { gameState.selectedPlacementObjectId = Well.objectId },
-                    onSelectChurch: { /* kuća – uskoro */ },
-                    onSelectDiplomacy: { /* kuća – uskoro */ }
-                )
-            case .food:
-                FoodButtonExpandedView(
-                    onSelectMill: { gameState.selectedPlacementObjectId = Windmill.objectId },
-                    onSelectBrewery: { /* hrana – uskoro */ },
-                    onSelectDistillery: { /* hrana – uskoro */ },
-                    onSelectWineCellar: { /* hrana – uskoro */ },
-                    onSelectTavern: { /* hrana – uskoro */ },
-                    onSelectPantry: { gameState.selectedPlacementObjectId = Granary.objectId },
-                    onSelectBakery: { gameState.selectedPlacementObjectId = Bakery.objectId },
-                    onSelectCanteen: { /* hrana – uskoro */ }
-                )
-            case .cave:
-                HStack(spacing: 12) {
-                    Text(LocalizedStrings.string(for: "soon", language: gameState.appLanguage))
-                        .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.6))
+        BuildCategoryContent(category: category)
+            .frame(minWidth: 280)
+    }
+
+    /// Cijena odabrane građevine iz cjenika; crveno ono što nedostaje.
+    private func priceTag(objectId: String) -> some View {
+        let price = PriceList.price(for: objectId)
+        let name = ObjectCatalog.shared.object(id: objectId)?.name ?? objectId
+        return VStack {
+            Spacer()
+            HStack(spacing: 8) {
+                Text(name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                if price.isFree {
+                    Text("besplatno")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.75))
+                }
+                ForEach(price.sortedItems, id: \.good) { item in
+                    Text("\(item.amount) \(item.good.displayName)")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(gameState.goodAmount(item.good) >= item.amount ? .white.opacity(0.9) : Color(red: 1, green: 0.45, blue: 0.4))
                 }
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+            .padding(.bottom, 150)
         }
-        .frame(minWidth: 280)
+        .allowsHitTesting(false)
     }
 
-    // MARK: - HUD (UX: Kamera → Postavljanje → Resursi → Izlaz)
-
-    /// Godišnje doba: lijevo godina, desno simbol. Eksplicitna animacija: stara ide dolje, nova dolazi odozgo.
     private var seasonHUDView: some View {
         HStack(spacing: 8) {
             Text(verbatim: String(displayedYear))
@@ -528,13 +632,11 @@ struct ContentView: View {
             Spacer(minLength: 4)
 
             ZStack {
-                // Odlazeća ikona – lagano ide prema dolje i nestaje
                 if let out = outgoingSeason {
                     seasonIconView(out)
                         .offset(y: seasonAnimOffset)
                         .opacity(Double(1.0 - min(1.0, Double(seasonAnimOffset) / 36.0)))
                 }
-                // Dolazna ikona – dolazi odozgo (počinje iznad, pomakne se na mjesto)
                 seasonIconView(displayedSeason)
                     .offset(y: outgoingSeason == nil ? 0 : CGFloat(-36) + seasonAnimOffset)
                     .opacity(outgoingSeason == nil ? 1 : Double(min(1.0, Double(seasonAnimOffset) / 36.0)))
@@ -547,6 +649,35 @@ struct ContentView: View {
         .clipped()
         .background(Color(white: 0, opacity: 0.35), in: RoundedRectangle(cornerRadius: 6))
         .help("Godina i godišnje doba")
+    }
+
+    private func hudPill(icon: String, text: String, color: Color) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 13))
+                .foregroundStyle(color)
+            Text(text)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.95))
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 28)
+        .background(Color(white: 0, opacity: 0.35), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private var castleClosedHUDView: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 14))
+                .foregroundStyle(.green)
+            Text("Dvorac zatvoren")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.95))
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 28)
+        .background(Color(white: 0, opacity: 0.35), in: RoundedRectangle(cornerRadius: 6))
+        .help("Dvorac je opasan zidovima, vodom i vratima – nitko ne može ući ni izaći osim kroz vrata.")
     }
 
     private func seasonIconView(_ season: SeasonIcon) -> some View {
@@ -565,207 +696,284 @@ struct ContentView: View {
     }
 
     private var gameHUD: some View {
-        MapScreenHUDBar {
-            // Mapa – veća ikona gumb, bez sive kutije
-            Button {
-                // Akcija – npr. pregled mape / fullscreen
-            } label: {
-                hudIconImage("map", fallback: "map", size: 32)
-            }
-            .buttonStyle(.plain)
-            .help("Mapa")
+        VStack(spacing: 8) {
+            hudIsland
+            HUDMessageStrip()
+        }
+    }
 
-            // Godišnje doba (samo ikona)
-            seasonHUDView
+    private var hudIsland: some View {
+        MapScreenHUDBar(onBackgroundTap: toggleHUDIsland, barHeight: 64, itemSpacing: 8) {
+            if hudMouseNear {
+                HStack(spacing: 8) {
+                Button {
+                    showMinimap.toggle()
+                } label: {
+                    hudIconImage("map", fallback: "map", size: 28)
+                }
+                .buttonStyle(.plain)
+                .help(showMinimap ? "Sakrij mapu" : "Mapa")
 
-            // Kompas (rotacija 90°)
-            CompassCubeView(
-                mapRotation: Binding(
-                    get: { gameState.mapCameraSettings.mapRotation },
-                    set: { new in
-                        var s = gameState.mapCameraSettings
-                        s.mapRotation = new
-                        gameState.mapCameraSettings = s
+                seasonHUDView
+
+                if gameState.isPlayerCastleEnclosed {
+                    castleClosedHUDView
+                }
+
+                if !gameState.isSandboxPlay {
+                    Button {
+                        showDiplomacy.toggle()
+                    } label: {
+                        hudPill(icon: "person.2.wave.2.fill", text: "Diplomacija", color: .white)
                     }
-                ),
-                panOffset: Binding(
-                    get: { gameState.mapCameraSettings.panOffset },
-                    set: { new in
-                        var s = gameState.mapCameraSettings
-                        s.panOffset = new
-                        gameState.mapCameraSettings = s
+                    .buttonStyle(.plain)
+                    .help(gameState.campaign.type.goalText)
+
+                    if gameState.campaign.type == .economic {
+                        Button {
+                            showTreasury.toggle()
+                        } label: {
+                            hudPill(icon: "building.columns.fill", text: "Riznica", color: .yellow)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Uplati zlato u riznicu – \(gameState.campaign.economicTarget.formatted()) za pobjedu.")
                     }
+                }
+
+                CompassCubeView(
+                    mapRotation: Binding(
+                        get: { gameState.mapCameraSettings.mapRotation },
+                        set: { new in
+                            var s = gameState.mapCameraSettings
+                            s.mapRotation = new
+                            gameState.mapCameraSettings = s
+                        }
+                    ),
+                    panOffset: Binding(
+                        get: { gameState.mapCameraSettings.panOffset },
+                        set: { new in
+                            var s = gameState.mapCameraSettings
+                            s.panOffset = new
+                            gameState.mapCameraSettings = s
+                        }
+                    )
                 )
+
+                ZoomPhaseView(mapCameraSettings: Binding(
+                    get: { gameState.mapCameraSettings },
+                    set: { gameState.mapCameraSettings = $0 }
+                ))
+
+                HUDBarDivider(height: 32)
+
+                HStack(spacing: 4) {
+                    Button {
+                        togglePauseFromHUD()
+                    } label: {
+                        hudIconImage("gear", fallback: "gearshape.fill", size: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Pauza")
+                    resourceCategoryButton("foodbottun", mode: .food, fallback: "fork.knife", help: "Hrana")
+                    resourceCategoryButton("weapons", mode: .weapons, fallback: "crossed.swords", help: "Oružje")
+                    resourceCategoryButton("resources", mode: .resources, fallback: "square.stack.3d.up.fill", help: "Resursi")
+                }
+
+                HUDBarDivider(height: 32)
+                }
+                .transition(.opacity)
+            }
+
+            PeopleCountView(count: gameState.peopleCount)
+
+            GoldHouseView(
+                amount: gameState.resources.gold,
+                happiness: Int((gameState.playerSeat.flatMap { gameState.happiness[$0.id] } ?? HappinessRules.start).rounded())
             )
 
-            // Zoom – 3 faze (šuma 2×, 3 stabla 8×, 1 stablo 14×)
-            ZoomPhaseView(mapCameraSettings: Binding(
-                get: { gameState.mapCameraSettings },
-                set: { gameState.mapCameraSettings = $0 }
-            ))
+            HUDBarDivider(height: 32)
 
-            HUDBarDivider()
-
-            // Gear (manje), Foodbottun, Weapons, Resources (veće)
-                    HStack(spacing: 10) {
-                        Button {
-                            showSettingsPopover.toggle()
-                        } label: {
-                            hudIconImage("gear", fallback: "gearshape.fill", size: 26)
-                        }
-                        .buttonStyle(.plain)
-                        .popover(isPresented: $showSettingsPopover, arrowEdge: .bottom) {
-                            settingsPopoverContent
-                        }
-                        .help("Postavke kamere i prikaza")
-                        Button { resourceStripMode = .food } label: { hudIconImage("foodbottun", fallback: "fork.knife", size: 48).scaleEffect(1.5) }
-                        .buttonStyle(.plain)
-                        Button { } label: { hudIconImage("weapons", fallback: "crossed.swords", size: 48).scaleEffect(1.5) }
-                        .buttonStyle(.plain)
-                        Button { resourceStripMode = .resources } label: { hudIconImage("resources", fallback: "square.stack.3d.up.fill", size: 48).scaleEffect(1.5) }
-                        .buttonStyle(.plain)
-                    }
-
-                    HUDBarDivider()
-
-                    // 0/0 i postotak (tamnocrveno kad 0/0); max 999/999; linija između; boja po postotku
-                    HUDScoreView(current: hudScoreCurrent, max: hudScoreMax)
-
-                    HUDBarDivider()
-
-                    // Resursi: solo = samo ikone (zlato, drvo, kamen, željezo, kruh, hmelj, žito); uvijek prikaži ikonu (asset ili SF Symbol).
-                    HStack(spacing: gameState.isSoloMode ? 16 : 12) {
-                        if gameState.isSoloMode {
-                            ResourceRow(iconName: "gold", value: gameState.resources.gold, iconSize: 48, systemFallback: "dollarsign.circle.fill", iconOnly: true)
-                            ResourceRow(iconName: "wood", value: gameState.resources.wood, iconSize: 48, systemFallback: "leaf.fill", iconOnly: true)
-                            ResourceRow(iconName: "stone", value: gameState.resources.stone, iconSize: 48, systemFallback: "mountain.2.fill", iconOnly: true)
-                            ResourceRow(iconName: "iron", value: gameState.resources.iron, iconSize: 48, systemFallback: "cylinder.fill", iconOnly: true)
-                            ResourceRow(iconName: "bread", value: gameState.food, iconSize: 48, systemFallback: "fork.knife", iconOnly: true)
-                            ResourceRow(iconName: "hop", value: gameState.hop, iconSize: 48, systemFallback: "mug.fill", iconOnly: true)
-                                .help(LocalizedStrings.string(for: "resource_hop", language: gameState.appLanguage))
-                            ResourceRow(iconName: "hay", value: gameState.hay, iconSize: 48, systemFallback: "circle.hexagongrid.fill", iconOnly: true)
-                        } else if resourceStripMode == .resources {
-                            ResourceRow(iconName: "gold", value: gameState.resources.gold, iconSize: 52, systemFallback: "dollarsign.circle.fill")
-                            ResourceRow(iconName: "wood", value: gameState.resources.wood)
-                            ResourceRow(iconName: "stone", value: gameState.resources.stone, iconSize: 52)
-                            ResourceRow(iconName: "iron", value: gameState.resources.iron, iconSize: 52)
-                        } else {
-                            ResourceRow(iconName: "bread", value: gameState.food)
-                            ResourceRow(iconName: "hop", value: gameState.hop)
-                                .help(LocalizedStrings.string(for: "resource_hop", language: gameState.appLanguage))
-                            ResourceRow(iconName: "hay", value: gameState.hay)
-                        }
-                    }
-                    .frame(width: gameState.isSoloMode ? 420 : 520)
-                    .id(resourceStripMode)
-                    .transition(.asymmetric(
-                        insertion: .opacity.animation(.easeOut(duration: 0.22)).combined(with: .scale(scale: 0.92)),
-                        removal: .opacity.animation(.easeIn(duration: 0.18)).combined(with: .scale(scale: 0.96))
-                    ))
-                    .animation(.easeInOut(duration: 0.25), value: resourceStripMode)
+            HStack(spacing: 4) {
+                ForEach(entriesForCurrentStrip()) { entry in
+                    resourceRow(for: entry, gameState: gameState)
+                }
+            }
+            .id(resourceStripMode)
+            .transition(.opacity)
+            .animation(.easeInOut(duration: 0.2), value: resourceStripMode)
+        }
+        .padding(.bottom, 8)
+        .background {
+            Button(action: togglePauseFromHUD) { Color.clear }
+                .keyboardShortcut(.escape, modifiers: [])
+                .frame(width: 0, height: 0)
+                .opacity(0)
+                .accessibilityHidden(true)
         }
     }
 
-    /// Mini prozor iz gear gumba: Pivot, Ćelije (sukladno temi). Zoom ostaje na traci.
-    private var settingsPopoverContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Kamera i prikaz")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.95))
-            Divider().background(.white.opacity(0.3))
-            HStack(spacing: 8) {
-                Button {
-                    showPivotIndicator.toggle()
-                } label: {
-                    Label(showPivotIndicator ? "Pivot uklj." : "Pivot", systemImage: "scope")
+    private func toggleHUDIsland() {
+        withAnimation(.easeInOut(duration: 0.22)) {
+            hudMouseNear.toggle()
+        }
+    }
+
+    private func togglePauseFromHUD() {
+        if showPauseMenu {
+            resumeFromPause()
+        } else {
+            openPauseMenu()
+        }
+    }
+
+    private func resourceCategoryButton(_ name: String, mode: ResourceStripMode, fallback: String, help: String) -> some View {
+        Button {
+            resourceStripMode = mode
+        } label: {
+            hudIconImage(name, fallback: fallback, size: 42)
+                .padding(2)
+                .background(
+                    resourceStripMode == mode ? Color.white.opacity(0.18) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 6)
+                )
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    private func entriesForCurrentStrip() -> [HUDResourceEntry] {
+        switch resourceStripMode {
+        case .resources: return HUDResourceCatalog.resourcesStrip
+        case .weapons: return HUDResourceCatalog.weaponsStrip
+        case .food: return HUDResourceCatalog.foodStrip
+        }
+    }
+
+    @ViewBuilder
+    private func resourceRow(for entry: HUDResourceEntry, gameState: GameState) -> some View {
+        let row = ResourceRow(
+            iconName: entry.iconName,
+            value: gameState.resourceValue(for: entry.id),
+            iconSize: hudBarIcon,
+            systemFallback: entry.systemFallback,
+            iconOnly: false
+        )
+        if let key = entry.helpKey {
+            row.help(LocalizedStrings.string(for: key, language: gameState.appLanguage))
+        } else {
+            row
+        }
+    }
+
+    private var pauseMenuOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.45)
+                .ignoresSafeArea()
+            VStack(spacing: 10) {
+                Text("Pauza")
+                    .font(.custom("Georgia", size: 28))
+                    .foregroundStyle(.white)
+                    .padding(.bottom, 6)
+                pauseMenuButton("Nastavi", action: resumeFromPause)
+                pauseMenuButton("Spremi", action: presentSaveMatchPanel)
+                pauseMenuButton("Učitaj", action: presentLoadMatchPanel)
+                pauseMenuButton("Ponovno pokreni") {
+                    pausedAt = nil
+                    showPauseMenu = false
+                    pauseMessage = nil
+                    gameState.restartCurrentMatch()
+                    gameStartTime = Date()
+                    displayedSeason = .winter
+                    displayedYear = 1100
+                }
+                pauseMenuButton("Glavni izbornik") {
+                    pausedAt = nil
+                    showPauseMenu = false
+                    pauseMessage = nil
+                    gameState.showMainMenu()
+                }
+                if let pauseMessage {
+                    Text(pauseMessage)
                         .font(.caption)
+                        .foregroundStyle(.white.opacity(0.9))
+                        .padding(.top, 4)
                 }
-                .buttonStyle(.bordered)
-                .tint(showPivotIndicator ? .yellow.opacity(0.4) : .white.opacity(0.2))
-                .foregroundStyle(showPivotIndicator ? .yellow : .white.opacity(0.9))
             }
-            HStack(spacing: 8) {
-                Text("Ćelije")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.9))
-                Toggle("", isOn: $showGrid)
-                    .toggleStyle(.switch)
-                    .labelsHidden()
-            }
-            Divider().background(.white.opacity(0.3))
-            if gameState.isSoloMode {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Placement konzola (Solo)")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.95))
-                        Spacer()
-                        Text("\(placementConsole.lines.count)")
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.white.opacity(0.7))
-                    }
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 4) {
-                            ForEach(Array(placementConsole.lines.enumerated()), id: \.offset) { _, line in
-                                Text(line)
-                                    .font(.system(size: 10, weight: .regular, design: .monospaced))
-                                    .foregroundStyle(.white.opacity(0.9))
-                                    .textSelection(.enabled)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                    }
-                    .frame(height: 170)
-                    .padding(8)
-                    .background(.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 8))
-
-                    HStack(spacing: 8) {
-                        Button {
-                            placementConsole.copyAllToPasteboard()
-                            placementDebugLog("UI copy placement logs (\(placementConsole.lines.count) lines)")
-                        } label: {
-                            Label("Kopiraj sve", systemImage: "doc.on.doc")
-                                .font(.caption)
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(.white.opacity(0.2))
-                        .foregroundStyle(.white)
-                        .keyboardShortcut("c", modifiers: [.command])
-
-                        Button {
-                            placementConsole.clear()
-                            placementDebugLog("UI clear placement logs")
-                        } label: {
-                            Label("Obriši", systemImage: "trash")
-                                .font(.caption)
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(.red.opacity(0.3))
-                        .foregroundStyle(.white)
-                    }
-                }
-                Divider().background(.white.opacity(0.3))
-            }
-            Button {
-                showSettingsPopover = false
-                gameState.showMainMenu()
-            } label: {
-                Label("Izlaz", systemImage: "rectangle.portrait.and.arrow.right")
-                    .font(.caption)
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .tint(.white.opacity(0.15))
-            .foregroundStyle(.white)
+            .padding(22)
+            .frame(width: 280)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
         }
-        .frame(width: gameState.isSoloMode ? 460 : 200)
-        .padding(14)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
 
-    /// Ikona za HUD: iz Icons/*.png ili SF Symbol. size: veličina u pt (zadnje dvije veće).
+    private func pauseMenuButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.custom("Georgia", size: 16))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+        }
+        .buttonStyle(.bordered)
+        .tint(.white.opacity(0.18))
+    }
+
+    private func openPauseMenu() {
+        pauseMessage = nil
+        gameState.pauseGame()
+        showPauseMenu = true
+    }
+
+    private func resumeFromPause() {
+        showPauseMenu = false
+        pauseMessage = nil
+        gameState.resumeGame()
+    }
+
+    private func presentSaveMatchPanel() {
+        let panel = NSSavePanel()
+        panel.title = "Spremi partiju"
+        panel.prompt = "Spremi"
+        panel.allowedContentTypes = [.json]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = "Partija"
+        if let dir = GameState.matchSavesDirectory() {
+            panel.directoryURL = dir
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        applyMatchLoadResult(message: gameState.saveMatch(to: url, elapsedSeconds: matchElapsedSeconds()), elapsed: nil)
+    }
+
+    private func presentLoadMatchPanel() {
+        let panel = NSOpenPanel()
+        panel.title = "Učitaj partiju"
+        panel.prompt = "Učitaj"
+        panel.allowedContentTypes = [.json]
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        if let dir = GameState.matchSavesDirectory() {
+            panel.directoryURL = dir
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let result = gameState.loadMatch(from: url)
+        applyMatchLoadResult(message: result.message, elapsed: result.elapsedSeconds)
+    }
+
+    private func matchElapsedSeconds() -> Int {
+        max(0, gameState.currentTurn - 1)
+    }
+
+    private func applyMatchLoadResult(message: String, elapsed: Int?) {
+        pauseMessage = message
+        guard let elapsed else { return }
+        gameStartTime = Date().addingTimeInterval(-TimeInterval(elapsed))
+        let (season, yearOffset) = SeasonIcon.fromElapsedSeconds(elapsed)
+        displayedSeason = season
+        displayedYear = 1100 + yearOffset
+        outgoingSeason = nil
+        seasonAnimOffset = 0
+    }
+
     private func hudIconImage(_ name: String, fallback systemName: String, size: CGFloat = 22) -> some View {
         Group {
             if let img = loadBarIcon(named: name) {
@@ -781,7 +989,6 @@ struct ContentView: View {
         .foregroundStyle(.white.opacity(0.9))
     }
 
-    /// Minijaturni prikaz zida – otvara se klikom na ikonu dvora u sredini.
     private var minijatureWallOverlay: some View {
         ZStack {
             Color.black.opacity(0.4)
@@ -818,6 +1025,182 @@ struct ContentView: View {
             .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.white.opacity(0.25), lineWidth: 1))
             .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 8)
         }
+    }
+
+    private var bottomBarHeight: CGFloat {
+        bottomBarPanelHeight
+    }
+
+    /// Lijevi i desni razmak uz bar su jednaki, pa bar ostaje na sredini. Mapa je na sredini lijevog razmaka, u visini bara.
+    private func bottomBarSideSlot(showsMap: Bool) -> some View {
+        Color.clear
+            .frame(maxWidth: .infinity)
+            .frame(height: bottomBarHeight)
+            .overlay {
+                if showsMap, showMinimap {
+                    GeometryReader { geo in
+                        let side = min(bottomBarHeight, max(36, geo.size.width - 24))
+                        minimapCard(side: side)
+                            .position(x: geo.size.width / 2, y: geo.size.height / 2)
+                    }
+                }
+            }
+            .allowsHitTesting(showsMap && showMinimap)
+    }
+
+    private func minimapCard(side: CGFloat) -> some View {
+        MinimapMiniature(
+            rows: gameState.gameMap.rows,
+            cols: gameState.gameMap.cols,
+            placements: gameState.gameMap.placements
+        )
+        .frame(width: side - 12, height: side - 12)
+        .padding(6)
+        .background(.ultraThickMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.25), lineWidth: 1))
+        .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 4)
+    }
+
+    private var logPanelOverlay: some View {
+        VStack {
+            Spacer(minLength: 0)
+            HStack {
+                Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Log")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.95))
+                        Spacer()
+                        Button {
+                            gameState.showLogPanel = false
+                        } label: {
+                            Text("x")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.9))
+                                .frame(width: 22, height: 22)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Zatvori")
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 10)
+                    Text("Log panel – poruke će se prikazivati ovdje.")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.8))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 12)
+                }
+                .frame(width: 280)
+                .background(.ultraThickMaterial, in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.white.opacity(0.25), lineWidth: 1))
+                .shadow(color: .black.opacity(0.4), radius: 16, x: 0, y: 6)
+                .padding(.trailing, 20)
+                .padding(.bottom, 100)
+            }
+        }
+        .allowsHitTesting(true)
+    }
+
+    private var performancePanelOverlay: some View {
+        VStack {
+            Spacer(minLength: 0)
+                .allowsHitTesting(false)
+            HStack {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Performanse")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.95))
+                        Spacer()
+                        Button {
+                            gameState.showFPS = false
+                            performance.stop()
+                        } label: {
+                            Text("x")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.9))
+                                .frame(width: 22, height: 22)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Zatvori")
+                    }
+                    performanceRow("Sličice", "\(performance.fps) fps")
+                    performanceRow("Kadar", String(format: "%.1f ms", performance.frameMs))
+                    performanceRow("Procesor", String(format: "%.0f %%", performance.cpuPercent))
+                    performanceRow("RAM igre", String(format: "%.0f MB", performance.appRamMB))
+                    performanceRow("RAM", String(format: "%.1f / %.0f GB", performance.systemRamUsedGB, performance.systemRamTotalGB))
+                    performanceRow("Grafika", performance.gpuName)
+                    performanceRow("GPU memorija", String(format: "%.0f MB", performance.gpuAllocatedMB))
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 10)
+                .padding(.bottom, 12)
+                .frame(width: 260)
+                .background(.ultraThickMaterial, in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.white.opacity(0.25), lineWidth: 1))
+                .shadow(color: .black.opacity(0.4), radius: 16, x: 0, y: 6)
+                .offset(performanceOffset)
+                .gesture(
+                    DragGesture(minimumDistance: 4)
+                        .onChanged { value in
+                            performanceOffset = CGSize(
+                                width: performanceDragOrigin.width + value.translation.width,
+                                height: performanceDragOrigin.height + value.translation.height
+                            )
+                        }
+                        .onEnded { _ in
+                            performanceDragOrigin = performanceOffset
+                        }
+                )
+                .padding(.leading, 20)
+                .padding(.bottom, 100)
+                Spacer(minLength: 0)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    private func performanceRow(_ title: String, _ value: String) -> some View {
+        HStack {
+            Text(title)
+                .foregroundStyle(.white.opacity(0.65))
+            Spacer(minLength: 8)
+            Text(value)
+                .foregroundStyle(.white.opacity(0.95))
+                .lineLimit(1)
+        }
+        .font(.caption.monospacedDigit())
+    }
+}
+
+private struct MinimapMiniature: View {
+    let rows: Int
+    let cols: Int
+    let placements: [Placement]
+
+    var body: some View {
+        Canvas { context, size in
+            let ground = Color(red: 0.74, green: 0.64, blue: 0.46)
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(ground))
+            let sx = size.width / CGFloat(max(cols, 1))
+            let sy = size.height / CGFloat(max(rows, 1))
+            let stone = Color(white: 0.62)
+            for placement in placements {
+                let rect = CGRect(
+                    x: CGFloat(placement.col) * sx,
+                    y: CGFloat(placement.row) * sy,
+                    width: max(1, CGFloat(placement.width) * sx),
+                    height: max(1, CGFloat(placement.height) * sy)
+                )
+                context.fill(Path(rect), with: .color(stone))
+            }
+            let mark = CGRect(x: size.width / 2 - 3, y: size.height / 2 - 3, width: 6, height: 6)
+            context.fill(Path(mark), with: .color(Color(red: 0.18, green: 0.53, blue: 0.67)))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }
 

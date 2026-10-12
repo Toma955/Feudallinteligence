@@ -2,36 +2,38 @@
 //  Food.swift
 //  Feudalism
 //
-//  Objekt Hrana (Food). Folder: Core/Objects/Food/
-//  Kasnije: .obj / .usdz model i tekstura u ovom folderu.
+//  Hrana: prozirna drvena kocka 4×4×4. Kroz drvo se vidi. Ima vlastiti kapacitet.
 //
 
 import Foundation
+import SceneKit
+import AppKit
 
-/// Hrana – objekt koji se gradi na karti. Kategorija: hrana.
-enum Food {
-    /// Stabilan id tipa (za placement na mapi).
+enum Food: PlaceableSceneKitObject {
     static let objectId = "object_food"
-
-    /// Kratica za prikaz na karti / u listi.
     static let displayCode = "H"
+    /// Koliko mjera hrane stane u jednu ovu građevinu.
+    static let capacity = 200
 
-    /// Ime 3D modela u bundleu (bez ekstenzije). Nil = za sada placeholder na mapi.
     static let modelAssetName: String? = nil
-
-    /// Podmapa u bundleu za budući .obj / teksturu.
     static let modelSubdirectory = "Core/Objects/Food"
 
-    /// Jedan GameObject za Hranu – za katalog i placement na mapi. 2×2 ćelije.
     static var gameObject: GameObject {
-        GameObject(
+        let d = ObjectDimensions.food
+        return GameObject(
             id: objectId,
             name: "Hrana",
             category: .hrana,
-            width: 2,
-            height: 2,
+            width: d.cellWidth,
+            height: d.cellHeight,
             displayCode: displayCode,
             modelAssetName: modelAssetName
         )
     }
+
+    static func loadSceneKitNode(from bundle: Bundle = .main) -> SCNNode? {
+        BuildingShapes.foodHall()
+    }
+
+    static func reapplyTexture(to node: SCNNode, bundle: Bundle = .main) -> Bool { true }
 }

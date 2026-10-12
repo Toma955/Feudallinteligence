@@ -2,13 +2,13 @@
 //  MapCreationRules.swift
 //  Feudalism
 //
-//  Pravila kreacije mape. Preset side = broj ćelija za gradnju po strani (200 → 200×200 ćelija).
-//  Svaka ćelija = 40×40 world jedinica (MapScale.worldUnitsPerMapCell), ne 10×10.
+//  Pravila kreacije mape. Preset side = metri po strani (200 → 200×200 m).
+//  Svaka ćelija = 1×1 metar (MapScale.worldUnitsPerMapCell).
 //
 
 import Foundation
 
-/// Pravila kreacije mape – jedan izvor istine. Mape se grade od minimalnih jedinica 10×10.
+/// Pravila kreacije mape – jedan izvor istine. Side je u metrima.
 enum MapCreationRules {
     // MARK: - Minimalna prostorna veličina
     /// Najmanja dozvoljena prostorna veličina za bilo koji element mape (npr. 1×2).

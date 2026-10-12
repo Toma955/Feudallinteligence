@@ -2,14 +2,13 @@
 //  GameMap.swift
 //  Feudalism
 //
-//  Mapa igre: grid ćelija za gradnju (40×40 svaka). Minimalna prostorna jedinica je 10×10;
-//  side u minimalnim jedinicama = rows * 4 kad je mapa kvadratna (npr. 50×50 ćelija → 200×200).
+//  Mapa igre: grid ćelija od 1×1 metar. Preset 200×200 = 200×200 metara.
 //
 
 import Foundation
 import CoreGraphics
 
-/// Cijela mapa igre – grid ćelija za gradnju (40×40) + lista postavljenih objekata (Placement).
+/// Cijela mapa igre – grid ćelija od 1 metra + lista postavljenih objekata (Placement).
 final class GameMap: ObservableObject {
     /// Broj redaka (ćelija za gradnju 40×40).
     let rows: Int
@@ -66,14 +65,14 @@ final class GameMap: ObservableObject {
         return h
     }
 
-    /// Pri generiranju mape sve ćelije su G (zemlja / ground), prohodnost normalno.
+    /// Pri generiranju mape sve ćelije su G (poluplodna zemlja), indeks kretanja 1.
     /// Poziva se na pozadinskom threadu pri kreiranju mape.
     static func makeGrid(rows: Int, cols: Int) -> [String: MapCell] {
         var result: [String: MapCell] = [:]
         for r in 0..<rows {
             for c in 0..<cols {
                 let coord = MapCoordinate(row: r, col: c)
-                result[coord.cellId] = MapCell(coordinate: coord, povrsina: .zemlja, prohodnost: .normalno)
+                result[coord.cellId] = MapCell(coordinate: coord, povrsina: .default)
             }
         }
         return result
@@ -87,6 +86,24 @@ final class GameMap: ObservableObject {
     /// Ćelija na (row, col).
     func cell(row: Int, col: Int) -> MapCell? {
         cell(at: MapCoordinate(row: row, col: col))
+    }
+
+    /// Postavljeni objekt, osim vrata, zatvara ćeliju za hod.
+    func blocksPassage(row: Int, col: Int) -> Bool {
+        guard row >= 0, col >= 0, row < rows, col < cols else { return true }
+        let coordinate = MapCoordinate(row: row, col: col)
+        return placements.contains { placement in
+            !placement.isDestroyed && placement.contains(coordinate)
+                && Passage.blocks(
+                    objectId: placement.objectId,
+                    row: coordinate.row,
+                    col: coordinate.col,
+                    originRow: placement.row,
+                    originCol: placement.col,
+                    width: placement.width,
+                    height: placement.height
+                )
+        }
     }
 
     /// Je li koordinata unutar mape?
@@ -112,12 +129,96 @@ final class GameMap: ObservableObject {
         objectWillChange.send()
     }
 
-    /// Postavi elevaciju na ćeliji (Map Editor – alat za teren).
+    /// Postavi elevaciju na ćeliji (Map Editor – alat za teren). Ograničeno na -5 … +100 m.
     func setHeight(at coordinate: MapCoordinate, _ value: CGFloat) {
         guard isValid(coordinate), var cell = cells[coordinate.cellId] else { return }
-        cell.height = value
+        cell.height = TerrainHeight.clamp(value)
         cells[coordinate.cellId] = cell
         objectWillChange.send()
+    }
+
+    /// Postavi teren ćelije (pustinja, plodna, put, …) sa zadanim kretanjem i gradnjom.
+    func setSurface(at coordinate: MapCoordinate, _ surface: PovrsinaType) {
+        guard isValid(coordinate), var cell = cells[coordinate.cellId] else { return }
+        cell.applySurface(surface)
+        cells[coordinate.cellId] = cell
+        objectWillChange.send()
+    }
+
+    /// Ručno dozvoli ili zabrani gradnju na ćeliji.
+    func setBuildable(at coordinate: MapCoordinate, _ value: Bool) {
+        guard isValid(coordinate), var cell = cells[coordinate.cellId] else { return }
+        cell.buildable = value
+        cells[coordinate.cellId] = cell
+        objectWillChange.send()
+    }
+
+    /// Ručno promijeni indeks kretanja ćelije (0 = neprohodno).
+    func setMovementIndex(at coordinate: MapCoordinate, _ value: Double) {
+        guard isValid(coordinate), var cell = cells[coordinate.cellId] else { return }
+        cell.movementIndex = max(0, value)
+        cell.walkable = cell.movementIndex > 0
+        cells[coordinate.cellId] = cell
+        objectWillChange.send()
+    }
+
+    /// Naslaga na ćeliji (kamen, željezo) ili nil.
+    func setDeposit(at coordinate: MapCoordinate, _ deposit: ResourceType?) {
+        guard isValid(coordinate), var cell = cells[coordinate.cellId] else { return }
+        cell.resource = deposit
+        cells[coordinate.cellId] = cell
+        objectWillChange.send()
+    }
+
+    /// Ima li područje naslagu danog resursa (barem jedna ćelija).
+    func hasDeposit(_ deposit: ResourceType, row: Int, col: Int, width: Int, height: Int) -> Bool {
+        for r in row..<(row + max(1, height)) {
+            for c in col..<(col + max(1, width)) where cell(row: r, col: c)?.resource == deposit {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Srednja točka ploče. nil vraća na automatsku (sredina, prosjek kutova).
+    func setCenterPoint(row: Int, col: Int, _ point: CellCenterPoint?) {
+        let coordinate = MapCoordinate(row: row, col: col)
+        guard isValid(coordinate), var cell = cells[coordinate.cellId] else { return }
+        cell.center = point
+        cells[coordinate.cellId] = cell
+        objectWillChange.send()
+    }
+
+    /// Svih 5 točaka ploče ćelije u koordinatama mreže (x = stupac, z = red, y = visina).
+    func surface(row: Int, col: Int) -> CellSurface {
+        func corner(_ vr: Int, _ vc: Int) -> CellSurfacePoint {
+            let offset = vertexOffset(vertexRow: vr, vertexCol: vc)
+            return CellSurfacePoint(
+                x: CGFloat(vc) + offset.x,
+                z: CGFloat(vr) + offset.y,
+                height: vertexHeightAt(vertexRow: vr, vertexCol: vc)
+            )
+        }
+        let tl = corner(row, col)
+        let tr = corner(row, col + 1)
+        let br = corner(row + 1, col + 1)
+        let bl = corner(row + 1, col)
+        let center: CellSurfacePoint
+        if let point = cell(row: row, col: col)?.center {
+            center = CellSurfacePoint(x: CGFloat(col) + 0.5 + point.dx, z: CGFloat(row) + 0.5 + point.dz, height: point.height)
+        } else {
+            center = CellSurfacePoint(
+                x: CGFloat(col) + 0.5,
+                z: CGFloat(row) + 0.5,
+                height: (tl.height + tr.height + br.height + bl.height) / 4
+            )
+        }
+        return CellSurface(topLeft: tl, topRight: tr, bottomRight: br, bottomLeft: bl, center: center)
+    }
+
+    /// Je li ploča ravna (svih 5 točaka na istoj visini).
+    func isFlat(row: Int, col: Int) -> Bool {
+        surface(row: row, col: col).isFlat
     }
 
     /// Vrati elevaciju na ćeliji (0 ako ne postoji).
@@ -153,16 +254,72 @@ final class GameMap: ObservableObject {
         return n > 0 ? sum / CGFloat(n) : 0
     }
 
-    /// Postavi visinu samo na tom vrhu (sjecištu). Map Editor – alat za točku.
+    /// Postavi visinu samo na tom vrhu (sjecištu). Map Editor – alat za točku. Ograničeno na -5 … +100 m.
     func setVertexHeight(vertexRow: Int, vertexCol: Int, _ value: CGFloat) {
         guard isValidVertex(vertexRow: vertexRow, vertexCol: vertexCol) else { return }
-        vertexHeights["\(vertexRow)_\(vertexCol)"] = value
+        vertexHeights["\(vertexRow)_\(vertexCol)"] = TerrainHeight.clamp(value)
+        objectWillChange.send()
+    }
+
+    /// Pomak kutova u ravnini (key "row_col"; x = stupac, y = red, u metrima). Prazno = pravilna mreža.
+    @Published private(set) var vertexOffsets: [String: CGPoint] = [:]
+
+    func vertexOffset(vertexRow: Int, vertexCol: Int) -> CGPoint {
+        vertexOffsets["\(vertexRow)_\(vertexCol)"] ?? .zero
+    }
+
+    /// Precizno pomakni kut u ravnini. Rubovi mape ostaju na rubu.
+    func setVertexOffset(vertexRow: Int, vertexCol: Int, _ offset: CGPoint) {
+        guard isValidVertex(vertexRow: vertexRow, vertexCol: vertexCol) else { return }
+        let onVerticalEdge = vertexCol == 0 || vertexCol == cols
+        let onHorizontalEdge = vertexRow == 0 || vertexRow == rows
+        let clamped = CGPoint(
+            x: onVerticalEdge ? 0 : TerrainPointOffset.clamp(offset.x),
+            y: onHorizontalEdge ? 0 : TerrainPointOffset.clamp(offset.y)
+        )
+        let key = "\(vertexRow)_\(vertexCol)"
+        if clamped == .zero {
+            vertexOffsets.removeValue(forKey: key)
+        } else {
+            vertexOffsets[key] = clamped
+        }
+        objectWillChange.send()
+    }
+
+    // MARK: - Početna mjesta AI lordova (dvorac sjeda sredinom na ćeliju)
+
+    static let maxLordStarts = 8
+
+    /// Mjesto po rednom broju (1 … 8). Lordovi u partiji redom zauzimaju mjesta.
+    @Published private(set) var lordStarts: [Int: MapCoordinate] = [:]
+
+    var orderedLordStarts: [MapCoordinate] {
+        lordStarts.keys.sorted().compactMap { lordStarts[$0] }
+    }
+
+    func setLordStart(slot: Int, at coordinate: MapCoordinate?) {
+        guard (1...Self.maxLordStarts).contains(slot) else { return }
+        if let coordinate, isValid(coordinate) {
+            lordStarts[slot] = coordinate
+        } else {
+            lordStarts.removeValue(forKey: slot)
+        }
+        objectWillChange.send()
+    }
+
+    func replaceLordStarts(_ starts: [Int: MapCoordinate]) {
+        lordStarts = starts.filter { (1...Self.maxLordStarts).contains($0.key) && isValid($0.value) }
+        objectWillChange.send()
+    }
+
+    func replaceVertexOffsets(_ newOffsets: [String: CGPoint]) {
+        vertexOffsets = newOffsets
         objectWillChange.send()
     }
 
     /// Zamijeni sve vertex visine (npr. pri učitavanju mape).
     func replaceVertexHeights(_ newHeights: [String: CGFloat]) {
-        vertexHeights = newHeights
+        vertexHeights = newHeights.mapValues(TerrainHeight.clamp)
         objectWillChange.send()
     }
 
@@ -195,9 +352,9 @@ final class GameMap: ObservableObject {
 
     /// Postavi objekt (objectId iz kataloga) veličine width×height na (row, col). Vraća placement ili nil ako nije moguće.
     @discardableResult
-    func place(objectId: String, width: Int, height: Int, atRow row: Int, col: Int) -> Placement? {
+    func place(objectId: String, width: Int, height: Int, atRow row: Int, col: Int, ownerId: String? = nil) -> Placement? {
         guard canPlace(width: width, height: height, atRow: row, col: col) else { return nil }
-        let p = Placement(objectId: objectId, row: row, col: col, width: width, height: height)
+        let p = Placement(objectId: objectId, row: row, col: col, width: width, height: height, ownerId: ownerId)
         objectWillChange.send()
         placements.append(p)
         return p
@@ -206,6 +363,25 @@ final class GameMap: ObservableObject {
     /// Ukloni placement po id.
     func removePlacement(id: String) {
         placements.removeAll { $0.id == id }
+        objectWillChange.send()
+    }
+
+    /// Primijeni štetu na placement (npr. vatra, napad). Ako HP padne na 0, placement ostaje s 0 HP (uništavanje može se obraditi pozivatelj).
+    func applyDamage(placementId: String, amount: Int) {
+        guard amount > 0, let idx = placements.firstIndex(where: { $0.id == placementId }) else { return }
+        let p = placements[idx]
+        let newHealth = max(0, p.currentHealth - amount)
+        placements[idx] = p.withHealth(newHealth)
+        objectWillChange.send()
+    }
+
+    /// Postavi trenutno zdravlje placementa (npr. popravka). Clamp na [0, maxHealth].
+    func setPlacementHealth(placementId: String, health: Int) {
+        guard let idx = placements.firstIndex(where: { $0.id == placementId }) else { return }
+        let p = placements[idx]
+        let maxHp = ObjectHealth.shared.maxHealth(for: p.objectId)
+        let clamped = max(0, min(health, maxHp))
+        placements[idx] = p.withHealth(clamped)
         objectWillChange.send()
     }
 
@@ -231,7 +407,7 @@ final class GameMap: ObservableObject {
 //   – generiraju se pri uključivanju editor moda i vežu na mapu.
 
 struct MapEditorSaveData: Codable {
-    enum CodingKeys: String, CodingKey { case mapName, rows, cols, placements, cells, createdDate, originOffsetX, originOffsetZ, vertexHeights }
+    enum CodingKeys: String, CodingKey { case mapName, rows, cols, placements, cells, createdDate, originOffsetX, originOffsetZ, vertexHeights, vertexOffsets, lordStarts, undergroundPlacements }
     /// Ime mape (obavezno pri spremanju).
     let mapName: String
     let rows: Int
@@ -247,8 +423,17 @@ struct MapEditorSaveData: Codable {
     let originOffsetZ: Double?
     /// Visine na vrhovima mreže (sjecišta) – key "row_col". Nil = prazno (teren iz ćelija).
     let vertexHeights: [String: Double]?
+    /// Pomaci kutova u ravnini – key "row_col", vrijednost [x, z] u metrima. Nil = pravilna mreža.
+    let vertexOffsets: [String: [Double]]?
+    /// Početna mjesta AI lordova – key = redni broj ("1" … "8").
+    let lordStarts: [String: MapCoordinate]?
+    /// Građevine podzemne mape (ista veličina kao nadzemna).
+    let undergroundPlacements: [Placement]?
 
-    init(mapName: String, rows: Int, cols: Int, placements: [Placement], cells: [String: MapCell]? = nil, createdDate: Date? = nil, originOffsetX: Double? = 0, originOffsetZ: Double? = 0, vertexHeights: [String: Double]? = nil) {
+    init(mapName: String, rows: Int, cols: Int, placements: [Placement], cells: [String: MapCell]? = nil, createdDate: Date? = nil, originOffsetX: Double? = 0, originOffsetZ: Double? = 0, vertexHeights: [String: Double]? = nil, vertexOffsets: [String: [Double]]? = nil, lordStarts: [String: MapCoordinate]? = nil, undergroundPlacements: [Placement]? = nil) {
+        self.vertexOffsets = vertexOffsets
+        self.lordStarts = lordStarts
+        self.undergroundPlacements = undergroundPlacements
         self.mapName = mapName
         self.rows = rows
         self.cols = cols
@@ -271,6 +456,28 @@ struct MapEditorSaveData: Codable {
         originOffsetX = try c.decodeIfPresent(Double.self, forKey: .originOffsetX)
         originOffsetZ = try c.decodeIfPresent(Double.self, forKey: .originOffsetZ)
         vertexHeights = try c.decodeIfPresent([String: Double].self, forKey: .vertexHeights)
+        vertexOffsets = try c.decodeIfPresent([String: [Double]].self, forKey: .vertexOffsets)
+        lordStarts = try c.decodeIfPresent([String: MapCoordinate].self, forKey: .lordStarts)
+        undergroundPlacements = try c.decodeIfPresent([Placement].self, forKey: .undergroundPlacements)
+    }
+
+    var lordStartSlots: [Int: MapCoordinate] {
+        Dictionary(uniqueKeysWithValues: (lordStarts ?? [:]).compactMap { key, value in Int(key).map { ($0, value) } })
+    }
+
+    static func encodeLordStarts(_ starts: [Int: MapCoordinate]) -> [String: MapCoordinate]? {
+        starts.isEmpty ? nil : Dictionary(uniqueKeysWithValues: starts.map { (String($0.key), $0.value) })
+    }
+
+    /// Pomaci kutova za GameMap.
+    var vertexOffsetPoints: [String: CGPoint] {
+        (vertexOffsets ?? [:]).compactMapValues { pair in
+            pair.count == 2 ? CGPoint(x: pair[0], y: pair[1]) : nil
+        }
+    }
+
+    static func encodeOffsets(_ offsets: [String: CGPoint]) -> [String: [Double]]? {
+        offsets.isEmpty ? nil : offsets.mapValues { [Double($0.x), Double($0.y)] }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -284,5 +491,8 @@ struct MapEditorSaveData: Codable {
         try c.encodeIfPresent(originOffsetX, forKey: .originOffsetX)
         try c.encodeIfPresent(originOffsetZ, forKey: .originOffsetZ)
         try c.encodeIfPresent(vertexHeights, forKey: .vertexHeights)
+        try c.encodeIfPresent(vertexOffsets, forKey: .vertexOffsets)
+        try c.encodeIfPresent(lordStarts, forKey: .lordStarts)
+        try c.encodeIfPresent(undergroundPlacements, forKey: .undergroundPlacements)
     }
 }

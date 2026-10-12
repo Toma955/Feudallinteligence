@@ -8,8 +8,6 @@
 
 import SwiftUI
 
-private let categoryColumnWidth: CGFloat = 48
-
 /// Jedna stavka u proširenom izborniku: ikona (asset ili SF Symbol), natpis, akcija; opcionalno highlight (npr. za Alati).
 struct CategoryExpandedItem {
     let assetName: String
@@ -18,6 +16,10 @@ struct CategoryExpandedItem {
     let action: () -> Void
     var isHighlighted: Bool = false
     var highlightColor: Color = .green
+    /// Nacrtana ikona (bez asseta), ima prednost pred assetom i SF Symbolom.
+    var customIcon: AnyView? = nil
+    /// Crnu linijsku PNG ikonu oboji foreground bojom.
+    var asTemplate: Bool = false
 }
 
 /// Prošireni sadržaj kategorije: HStack ikona, ispod HStack natpisa. Koristi BarIconCache za ikone.
@@ -27,12 +29,12 @@ struct CategoryExpandedView: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            HStack(spacing: 14) {
+            HStack(spacing: 6) {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                     categoryButton(item: item)
                 }
             }
-            HStack(spacing: 14) {
+            HStack(spacing: 6) {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                     categoryLabel(item: item)
                 }
@@ -45,16 +47,19 @@ struct CategoryExpandedView: View {
     private func categoryButton(item: CategoryExpandedItem) -> some View {
         Button(action: item.action) {
             Group {
-                if let img = BarIconCache.shared.image(named: item.assetName, bundle: .main) {
-                    Image(nsImage: img)
+                if let custom = item.customIcon {
+                    custom
+                } else if let img = BarIconCache.shared.image(named: item.assetName, bundle: .main) {
+                    Image(nsImage: templateCopy(img, enabled: item.asTemplate))
                         .resizable()
+                        .renderingMode(item.asTemplate ? .template : .original)
                         .scaledToFit()
                 } else {
                     Image(systemName: item.systemName)
                         .font(.system(size: 28))
                 }
             }
-            .frame(width: categoryColumnWidth, height: categoryColumnWidth)
+            .frame(width: 36, height: 36)
             .foregroundStyle(item.isHighlighted ? item.highlightColor : .white.opacity(0.95))
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
@@ -62,15 +67,17 @@ struct CategoryExpandedView: View {
             )
         }
         .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
     }
 
     private func categoryLabel(item: CategoryExpandedItem) -> some View {
         Text(LocalizedStrings.string(for: item.labelKey, language: gameState.appLanguage))
-            .font(.system(size: 9))
+            .font(.system(size: 10))
             .foregroundStyle(.white.opacity(0.9))
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
-            .frame(width: categoryColumnWidth, alignment: .center)
+            .multilineTextAlignment(.center)
+            .lineLimit(2)
+            .minimumScaleFactor(0.7)
+            .frame(maxWidth: .infinity, minHeight: 26, alignment: .top)
             .contentShape(Rectangle())
             .onTapGesture { item.action() }
     }

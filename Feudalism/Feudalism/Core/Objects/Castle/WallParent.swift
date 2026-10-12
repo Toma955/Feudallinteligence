@@ -68,7 +68,7 @@ extension HugeWall: WallParentProtocol {
 
 // MARK: - Mali zid (SmallWall) – 6/10, 240 jedinica.
 extension SmallWall: WallParentProtocol {
-    static var wallHeightInUnits: CGFloat { 240 }
+    static var wallHeightInUnits: CGFloat { MapScale.meters(ObjectDimensions.smallWall.heightCells) }
     static var wallHeightLevel: Int { 6 }
     static var wallHeightMax: Int { 10 }
 }

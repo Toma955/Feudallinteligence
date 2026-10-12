@@ -12,35 +12,62 @@ import SwiftUI
 
 /// Ista traka gore za solo i Map Editor: širina taman da sve stane (bez rastezanja), visina 52.
 struct MapScreenHUDBar<Content: View>: View {
+    var onBackgroundTap: (() -> Void)?
+    var barHeight: CGFloat
+    var itemSpacing: CGFloat
     @ViewBuilder let content: () -> Content
+
+    init(onBackgroundTap: (() -> Void)? = nil, barHeight: CGFloat = 52, itemSpacing: CGFloat = 16, @ViewBuilder content: @escaping () -> Content) {
+        self.onBackgroundTap = onBackgroundTap
+        self.barHeight = barHeight
+        self.itemSpacing = itemSpacing
+        self.content = content
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
                 Spacer(minLength: 0)
-                HStack(spacing: 16) {
-                    content()
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 0)
-                .fixedSize(horizontal: true, vertical: false)
-                .frame(minHeight: 52, maxHeight: 52)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
-                .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 1)
+                hudPill
+                    .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 1)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 16)
             .padding(.top, 8)
         }
     }
+
+    private var hudPill: some View {
+        let pill = HStack(spacing: itemSpacing) {
+            content()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 0)
+        .fixedSize(horizontal: true, vertical: false)
+                .frame(minHeight: barHeight, maxHeight: barHeight)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+
+        return Group {
+            if let onBackgroundTap {
+                pill
+                    .contentShape(RoundedRectangle(cornerRadius: 10))
+                    .onTapGesture(perform: onBackgroundTap)
+            } else {
+                pill
+            }
+        }
+    }
 }
 
 /// Vertikalni razdjelnik u HUD traci (1×28, bijela 0.2).
 struct HUDBarDivider: View {
+    var height: CGFloat = 28
+
     var body: some View {
         Rectangle()
             .fill(.white.opacity(0.2))
-            .frame(width: 1, height: 28)
+            .frame(width: 1, height: height)
     }
 }
 

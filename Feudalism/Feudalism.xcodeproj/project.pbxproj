@@ -115,6 +115,7 @@
 				F0DDE3842F49808C00D1017C /* Copy Stone model + texture */,
 				F0DDE3852F49808C00D1017C /* Copy ground texture */,
 				F0DDE3862F49808C00D1017C /* Copy Side texture */,
+				F0DDE3872F49808C00D1017C /* Copy map textures */,
 			);
 			buildRules = (
 			);
@@ -465,6 +466,21 @@
 			shellPath = /bin/sh;
 			shellScript = "set -e\nRES=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources\"\nSIDE=\"$RES/Core/Objects/Textures/side\"\nmkdir -p \"$SIDE\"\nSRC=\"${SRCROOT}/Feudalism/Core/Objects/Textures/side\"\ncp \"$SRC/\"*.png \"$SIDE/\" 2>/dev/null || true\ncp \"$SRC/\"*.jpg \"$SIDE/\" 2>/dev/null || true\n";
 		};
+		F0DDE3872F49808C00D1017C /* Copy map textures */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Feudalism/Core/Objects/Textures/map/map_textures.json",
+			);
+			name = "Copy map textures";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nRES=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources\"\nMAP=\"$RES/Core/Objects/Textures/map\"\nmkdir -p \"$MAP\"\nSRC=\"${SRCROOT}/Feudalism/Core/Objects/Textures/map\"\ncp \"$SRC/\"*.json \"$MAP/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$MAP/\" 2>/dev/null || true\ncp \"$SRC/\"*.jpg \"$MAP/\" 2>/dev/null || true\n";
+		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -636,6 +652,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Feudallinteligence;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -662,6 +679,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Feudallinteligence;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

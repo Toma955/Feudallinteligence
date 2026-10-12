@@ -1,43 +1,46 @@
-//
-//  FeudalismUITests.swift
-//  FeudalismUITests
-//
-//  Created by Toma Babić on 21.02.2026..
-//
-
 import XCTest
 
 final class FeudalismUITests: XCTestCase {
 
     override func setUpWithError() throws {
-        // Put setup code here. This method is called before the invocation of each test method in the class.
-
-        // In UI tests it is usually best to stop immediately when a failure occurs.
         continueAfterFailure = false
-
-        // In UI tests it’s important to set the initial state - such as interface orientation - required for your tests before they run. The setUp method is a good place to do this.
-    }
-
-    override func tearDownWithError() throws {
-        // Put teardown code here. This method is called after the invocation of each test method in the class.
     }
 
     @MainActor
-    func testExample() throws {
-        // UI tests must launch the application that they test.
+    func testSoloEnterAndExit() throws {
         let app = XCUIApplication()
+        app.launchArguments.append("-skipIntro")
         app.launch()
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
+        let soloButton = app.buttons["menu_solo"]
+        XCTAssertTrue(soloButton.waitForExistence(timeout: 3), "Glavni izbornik s gumbom Solo treba biti vidljiv")
+        soloButton.tap()
+
+        let nazadButton = app.buttons["solo_nazad"]
+        XCTAssertTrue(nazadButton.waitForExistence(timeout: 3), "Solo setup ekran s gumbom Nazad treba biti vidljiv")
+        nazadButton.tap()
+
+        XCTAssertTrue(soloButton.waitForExistence(timeout: 2), "Nakon Nazad treba biti ponovno na glavnom izborniku")
     }
 
     @MainActor
-    func testLaunchPerformance() throws {
-        if #available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 7.0, *) {
-            // This measures how long it takes to launch your application.
-            measure(metrics: [XCTApplicationLaunchMetric()]) {
-                XCUIApplication().launch()
-            }
+    func testSoloBuilderEmptyMaps() throws {
+        let app = XCUIApplication()
+        app.launchArguments.append("-skipIntro")
+        app.launch()
+
+        let soloButton = app.buttons["menu_solo"]
+        XCTAssertTrue(soloButton.waitForExistence(timeout: 3))
+        soloButton.tap()
+
+        let nazadButton = app.buttons["solo_nazad"]
+        XCTAssertTrue(nazadButton.waitForExistence(timeout: 3))
+
+        for side in [200, 400, 600, 800, 1000] {
+            XCTAssertTrue(app.buttons["solo_empty_map_\(side)"].waitForExistence(timeout: 1))
         }
+
+        nazadButton.tap()
+        XCTAssertTrue(soloButton.waitForExistence(timeout: 2))
     }
 }

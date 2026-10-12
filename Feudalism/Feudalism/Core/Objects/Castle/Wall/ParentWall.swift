@@ -16,13 +16,15 @@ import SceneKit
 enum ParentWall {
     /// Jedan izvor istine: 1 ćelija mape = 40×40 world; usklađeno s MapScale i SceneKitMapView.
     static var cubeSize: CGFloat { MapScale.objectCubeWorldUnits }
-    static let defaultWallHeight: CGFloat = 400
+    static var defaultWallHeight: CGFloat { MapScale.meters(ObjectDimensions.hugeWall.heightCells) }
     private static let wallColor = NSColor(red: 0.45, green: 0.32, blue: 0.22, alpha: 1)
 
-    private static let tileU: CGFloat = 1
-    private static func tileV(for height: CGFloat) -> CGFloat { height / cubeSize }
-    private static let topTileU: CGFloat = 1
-    private static let topTileV: CGFloat = 1
+    /// Jedno ponavljanje teksture na 2 m. Kamera je na 40 m (daleko, zoom 2), 10 m (srednje, zoom 8) i oko 6 m (blizu, zoom 14). Gušće ponavljanje se na dalekoj kameri slije u sivu boju.
+    private static let metersPerTextureRepeat: CGFloat = 2
+    private static var tileU: CGFloat { max(0.25, cubeSize / metersPerTextureRepeat) }
+    private static func tileV(for height: CGFloat) -> CGFloat { max(0.25, height / metersPerTextureRepeat) }
+    private static var topTileU: CGFloat { tileU }
+    private static var topTileV: CGFloat { tileU }
 
     private struct WallTextureSet {
         let baseColor: NSImage?
@@ -43,6 +45,17 @@ enum ParentWall {
         prop.wrapS = .repeat
         prop.wrapT = .repeat
         prop.contentsTransform = SCNMatrix4MakeScale(u, v, 1)
+        prop.mipFilter = .linear
+        prop.maxAnisotropy = 16
+    }
+
+    private static func finishWallMaterial(_ mat: SCNMaterial) {
+        mat.lightingModel = .blinn
+        mat.locksAmbientWithDiffuse = true
+        mat.ambient.contents = NSColor.white
+        mat.specular.contents = NSColor(white: 0.15, alpha: 1)
+        mat.shininess = 0.08
+        mat.isDoubleSided = true
     }
 
     private static func textureURL(bundle: Bundle, name: String, subdirs: [String?]) -> URL? {
@@ -57,7 +70,11 @@ enum ParentWall {
         return nil
     }
 
+    private static var cachedWallTextures: WallTextureSet?
+    private static var cachedTopTextures: TopTextureSet?
+
     private static func loadWallTextureSet(bundle: Bundle = .main) -> WallTextureSet {
+        if let cachedWallTextures { return cachedWallTextures }
         let subdirs: [String?] = [
             "Core/Objects/Textures/wall",
             "Objects/Textures/wall",
@@ -93,12 +110,14 @@ enum ParentWall {
         if set.baseColor == nil {
             placementDebugLog("Wall texture missing: expected base color in Core/Objects/Textures/wall (wall_base_color.png)")
         } else {
-            placementDebugLog("Wall texture set loaded (base + optional normal/roughness/ao/displacement)")
+            placementDebugLog("Wall texture set loaded once for the GPU")
         }
+        cachedWallTextures = set
         return set
     }
 
     private static func loadTopTextureSet(bundle: Bundle = .main) -> TopTextureSet {
+        if let cachedTopTextures { return cachedTopTextures }
         let subdirs: [String?] = [
             "Core/Objects/Textures/top_wall",
             "Objects/Textures/top_wall",
@@ -134,8 +153,9 @@ enum ParentWall {
         if set.baseColor == nil {
             placementDebugLog("Top wall texture missing: expected base color in Core/Objects/Textures/top_wall (top_wall_base_color.png/jpg)")
         } else {
-            placementDebugLog("Top wall texture set loaded (base + optional normal/roughness/ao/displacement)")
+            placementDebugLog("Top wall texture set loaded once for the GPU")
         }
+        cachedTopTextures = set
         return set
     }
 
@@ -144,26 +164,11 @@ enum ParentWall {
         let mat = SCNMaterial()
         mat.diffuse.contents = textures.baseColor ?? wallColor
         applyTiling(mat.diffuse, u: tileU, v: tileV(for: wallHeight))
-        mat.ambient.contents = NSColor.white
-        mat.specular.contents = NSColor.darkGray
-        mat.isDoubleSided = true
-        mat.lightingModel = .physicallyBased
+        finishWallMaterial(mat)
         if let n = textures.normalGL {
             mat.normal.contents = n
-            mat.normal.intensity = 1.0
+            mat.normal.intensity = 0.35
             applyTiling(mat.normal, u: tileU, v: tileV(for: wallHeight))
-        }
-        if let r = textures.roughness {
-            mat.roughness.contents = r
-            applyTiling(mat.roughness, u: tileU, v: tileV(for: wallHeight))
-        }
-        if let ao = textures.ambientOcclusion {
-            mat.ambientOcclusion.contents = ao
-            applyTiling(mat.ambientOcclusion, u: tileU, v: tileV(for: wallHeight))
-        }
-        if let d = textures.displacement {
-            mat.displacement.contents = d
-            applyTiling(mat.displacement, u: tileU, v: tileV(for: wallHeight))
         }
         return mat
     }
@@ -173,26 +178,11 @@ enum ParentWall {
         let mat = SCNMaterial()
         mat.diffuse.contents = textures.baseColor ?? wallColor
         applyTiling(mat.diffuse, u: topTileU, v: topTileV)
-        mat.ambient.contents = NSColor.white
-        mat.specular.contents = NSColor.darkGray
-        mat.isDoubleSided = true
-        mat.lightingModel = .physicallyBased
+        finishWallMaterial(mat)
         if let n = textures.normalGL {
             mat.normal.contents = n
-            mat.normal.intensity = 1.0
+            mat.normal.intensity = 0.35
             applyTiling(mat.normal, u: topTileU, v: topTileV)
-        }
-        if let r = textures.roughness {
-            mat.roughness.contents = r
-            applyTiling(mat.roughness, u: topTileU, v: topTileV)
-        }
-        if let ao = textures.ambientOcclusion {
-            mat.ambientOcclusion.contents = ao
-            applyTiling(mat.ambientOcclusion, u: topTileU, v: topTileV)
-        }
-        if let d = textures.displacement {
-            mat.displacement.contents = d
-            applyTiling(mat.displacement, u: topTileU, v: topTileV)
         }
         return mat
     }
