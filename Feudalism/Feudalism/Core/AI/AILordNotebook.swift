@@ -30,9 +30,29 @@ struct AILordNotebook: Codable, Equatable, Identifiable {
     }
 }
 
-/// Jedna stranica bilježnice. Polja dimenzija još ne postoje.
+/// Jedna stranica bilježnice: što je lord primijetio u partiji i što je kod sebe popravio.
 struct AILordNotebookPage: Codable, Equatable, Identifiable {
     let id: String
+    var title: String
+    var note: String
+    var matchId: String
+
+    init(id: String = UUID().uuidString, title: String, note: String, matchId: String) {
+        self.id = id
+        self.title = title
+        self.note = note
+        self.matchId = matchId
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, title, note, matchId }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        note = try c.decodeIfPresent(String.self, forKey: .note) ?? ""
+        matchId = try c.decodeIfPresent(String.self, forKey: .matchId) ?? ""
+    }
 }
 
 /// Jedan level. `value` je ocjena za prikaz; matrice parametara su u AILordWeights (datoteka po levelu).

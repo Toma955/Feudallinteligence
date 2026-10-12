@@ -44,6 +44,9 @@ struct ObjectPreviewView: NSViewRepresentable {
     }
 
     private func previewNode(objectId: String) -> SCNNode {
+        if let cached = GameAssetLoader.shared.cachedPlacementNode(objectId: objectId)?.clone() {
+            return cached
+        }
         if let node = SceneKitPlacementRegistry.loadSceneKitNode(objectId: objectId, bundle: .main) {
             return node
         }
@@ -144,7 +147,7 @@ struct SoldierPreviewView: NSViewRepresentable {
 
     private func apply(type: SoldierType, to view: SCNView) {
         let scene = SCNScene()
-        let node = makeSoldierPreviewNode(type: type)
+        let node = GameAssetLoader.shared.cachedSoldierNode(type.rawValue)?.clone() ?? makeSoldierPreviewNode(type: type)
         scene.rootNode.addChildNode(node)
         let (minB, maxB) = node.boundingBox
         let dx = max(CGFloat(maxB.x - minB.x), 0.3)
@@ -185,6 +188,14 @@ enum AboutGoodKind: String, CaseIterable, Identifiable {
     case spices
     case wine
     case sausages
+    case sword
+    case shield
+    case spear
+    case bow
+    case arrow
+    case crossbow
+    case mace
+    case leather
 
     var id: String { rawValue }
 
@@ -206,6 +217,14 @@ enum AboutGoodKind: String, CaseIterable, Identifiable {
         case .spices: return "Začini"
         case .wine: return "Vino"
         case .sausages: return "Kobasice"
+        case .sword: return "Mač"
+        case .shield: return "Štit"
+        case .spear: return "Koplje"
+        case .bow: return "Luk"
+        case .arrow: return "Strijela"
+        case .crossbow: return "Samostrijel"
+        case .mace: return "Buzdovan"
+        case .leather: return "Kožna odjeća"
         }
     }
 }
@@ -237,17 +256,7 @@ struct GoodPreviewView: NSViewRepresentable {
 
     private func makeScene(_ kind: AboutGoodKind) -> SCNScene {
         let scene = SCNScene()
-        let node: SCNNode
-        switch kind {
-        case .plank, .iron, .stone:
-            node = SCNNode(geometry: box(kind))
-        case .appleBasket:
-            node = AppleBasketShapes.appleBasket()
-        case .eggBasket:
-            node = AppleBasketShapes.eggBasket()
-        default:
-            node = FoodPreviewShapes.node(kind)
-        }
+        let node = GameAssetLoader.shared.cachedGoodNode(kind.rawValue)?.clone() ?? Self.previewNode(kind)
         scene.rootNode.addChildNode(node)
         node.runAction(SCNAction.repeatForever(SCNAction.rotateBy(x: 0, y: .pi * 2, z: 0, duration: 10)))
         let camera = SCNNode()
@@ -259,7 +268,22 @@ struct GoodPreviewView: NSViewRepresentable {
         return scene
     }
 
-    private func box(_ kind: AboutGoodKind) -> SCNBox {
+    static func previewNode(_ kind: AboutGoodKind) -> SCNNode {
+        switch kind {
+        case .plank, .iron, .stone:
+            return SCNNode(geometry: box(kind))
+        case .appleBasket:
+            return AppleBasketShapes.appleBasket()
+        case .eggBasket:
+            return AppleBasketShapes.eggBasket()
+        case .sword, .shield, .spear, .bow, .arrow, .crossbow, .mace, .leather:
+            return WeaponPreviewShapes.node(kind)
+        default:
+            return FoodPreviewShapes.node(kind)
+        }
+    }
+
+    private static func box(_ kind: AboutGoodKind) -> SCNBox {
         let box: SCNBox
         let fallback: NSColor
         switch kind {

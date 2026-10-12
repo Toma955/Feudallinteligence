@@ -70,26 +70,33 @@ struct SoloSetupView: View {
     @State private var initialCrossbow: Int = 0
     @State private var initialMace: Int = 0
     @State private var initialBowAndSparrow: Int = 0
+    @State private var showRecordings = false
 
     private let cardSide: CGFloat = 96
 
     private var canStart: Bool { preparedMap != nil && loadProgress >= 0.999 }
 
     var body: some View {
-        VStack(spacing: 12) {
-            Group {
-                if page == .maps {
-                    HStack(alignment: .top, spacing: 10) {
-                        ForEach(MapSizePreset.allCases) { preset in
-                            sizeColumn(preset)
+        Group {
+            if showRecordings {
+                VStack(spacing: 10) {
+                    HStack {
+                        Button {
+                            showRecordings = false
+                        } label: {
+                            Label(L("menu_back"), systemImage: "chevron.backward")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(.white)
                         }
+                        .buttonStyle(.plain)
+                        Spacer()
                     }
-                } else {
-                    resourcesSection
+                    MatchHistoryView()
+                        .environmentObject(gameState)
                 }
+            } else {
+                setupBody
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            bottomBar
         }
         .padding(.horizontal, 22)
         .padding(.top, 16)
@@ -108,10 +115,29 @@ struct SoloSetupView: View {
         }
     }
 
+    private var setupBody: some View {
+        VStack(spacing: 12) {
+            Group {
+                if page == .maps {
+                    HStack(alignment: .top, spacing: 10) {
+                        ForEach(MapSizePreset.allCases) { preset in
+                            sizeColumn(preset)
+                        }
+                    }
+                } else {
+                    resourcesSection
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            bottomBar
+        }
+    }
+
     private var bottomBar: some View {
         HStack(spacing: 16) {
             Spacer(minLength: 0)
             nazadButton
+            MatchRecordBar { showRecordings = true }
             pokreniButton
             Spacer(minLength: 0)
         }

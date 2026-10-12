@@ -197,9 +197,12 @@ struct MenuBrandIsland: View {
         .padding(.leading, isExpanded ? 10 : 22)
         .padding(.trailing, isExpanded ? 16 : 22)
         .padding(.vertical, isExpanded ? 8 : 12)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.white.opacity(0.22), lineWidth: 1))
-        .clipShape(Capsule())
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: isExpanded ? 26 : 30, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: isExpanded ? 26 : 30, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: isExpanded ? 26 : 30, style: .continuous))
         .shadow(color: .black.opacity(0.3), radius: isExpanded ? 16 : 12, y: isExpanded ? 8 : 6)
         .fixedSize()
         .animation(menuIslandMotion, value: isExpanded)
@@ -336,7 +339,7 @@ struct MenuBrandIsland: View {
             islandButton(icon: "person.2.fill", titleKey: "island_multiplayer", action: onMultiplayer)
             ecoButton
             islandButton(icon: "sportscourt.fill", titleKey: "island_training", action: onTraining)
-            islandButton(icon: "clock.arrow.circlepath", titleKey: "island_history", action: onHistory)
+            islandButton(icon: "text.alignleft", titleKey: "island_history", action: onHistory)
             islandButton(icon: "person.crop.circle.badge.plus", titleKey: "island_friends", action: onFriends)
         }
     }
@@ -419,6 +422,67 @@ struct MenuBrandIsland: View {
         }
         .buttonStyle(.plain)
         .help(title)
+    }
+}
+
+private struct SavedMatchThumb: View {
+    var entry: SavedMatchEntry
+
+    var body: some View {
+        Canvas { context, size in
+            let ground = Path(CGRect(origin: .zero, size: size))
+            context.fill(ground, with: .color(Color(red: 0.16, green: 0.28, blue: 0.14)))
+            for mark in entry.marks {
+                let x = mark.x * size.width
+                let y = mark.y * size.height
+                let dot = CGRect(x: x - 1.5, y: y - 1.5, width: 3, height: 3)
+                context.fill(Path(ellipseIn: dot), with: .color(.yellow.opacity(0.9)))
+            }
+        }
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.2), lineWidth: 1))
+    }
+}
+
+struct SavedGamesView: View {
+    @EnvironmentObject private var gameState: GameState
+    var onStarted: () -> Void
+    @State private var entries: [SavedMatchEntry] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if entries.isEmpty {
+                Text("Nema spremljenih igara.")
+                    .font(.system(size: 15))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 12)], spacing: 12) {
+                        ForEach(entries) { entry in
+                            Button {
+                                gameState.continueSavedMatch(at: entry.url)
+                                onStarted()
+                            } label: {
+                                VStack(spacing: 6) {
+                                    SavedMatchThumb(entry: entry)
+                                        .frame(height: 84)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    Text(entry.name)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(0.92))
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.center)
+                                }
+                                .padding(8)
+                                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+        }
+        .onAppear { entries = gameState.savedMatchEntries() }
     }
 }
 

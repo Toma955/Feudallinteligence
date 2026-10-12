@@ -81,6 +81,22 @@ struct AILordWeights: Codable, Equatable {
         blocks.first { $0.name == name }
     }
 
+    /// Pomakne jednu osobinu (0…1). Lord time upisuje što je naučio iz partije.
+    mutating func nudgeTrait(_ name: String, by delta: Float) {
+        guard let index = Self.traitNames.firstIndex(of: name),
+              let blockIndex = blocks.firstIndex(where: { $0.name == "traits" }),
+              blocks[blockIndex].values.indices.contains(index) else { return }
+        let next = blocks[blockIndex].values[index] + delta
+        blocks[blockIndex].values[index] = min(1, max(0, next))
+    }
+
+    func traitValue(_ name: String) -> Float {
+        guard let index = Self.traitNames.firstIndex(of: name),
+              let block = block("traits"),
+              block.values.indices.contains(index) else { return 0 }
+        return block.values[index]
+    }
+
     func fits(_ vocabulary: AILordVocabulary) -> Bool {
         vocabularySize == vocabulary.tokens.count && actionCount == vocabulary.actions.count
             && block("traits")?.cols == Self.traitNames.count

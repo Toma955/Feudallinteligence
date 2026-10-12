@@ -111,7 +111,7 @@ private func makeTerrainTexture(gameMap: GameMap? = nil, useWhiteBackground: Boo
             return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
         }
         /// Ako composite nije uspio (npr. memorija), ispuni tilanjem poluplodne zemlje da ne ostane siva.
-        if let groundTile = tiles[.poluplodna], let cg = makeTiledGroundImage(tile: groundTile, size: terrainTextureMaxSide) {
+        if let groundTile = tiles[.tlo], let cg = makeTiledGroundImage(tile: groundTile, size: terrainTextureMaxSide) {
             return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
         }
     }
@@ -564,6 +564,7 @@ private func makeMaceCursor() -> NSCursor {
 // MARK: - NSView wrapper za SCNView (miš, tipke)
 private final class SceneKitMapNSView: NSView {
     var scnView: SCNView?
+    var onWillDetach: (() -> Void)?
     var onPanChange: ((CGPoint) -> Void)?
     /// Pomak kamere u metrima (world X, world Z) tako da polje ostane pod kursorom.
     var onPanLock: ((CGFloat, CGFloat) -> Void)?
@@ -575,6 +576,15 @@ private final class SceneKitMapNSView: NSView {
     var onClick: ((Int, Int) -> Void)?
     var onWallLinePreview: (([(Int, Int)]) -> Void)?
     var onWallLineCommit: (([(Int, Int)]) -> Void)?
+
+    /// Zaustavi crtanje prije nego SwiftUI zbriše pogled. Inače Metal padne pri povratku na izbornik.
+    @objc func stopScene() {
+        onWillDetach?()
+        scnView?.delegate = nil
+        scnView?.rendersContinuously = false
+        scnView?.isPlaying = false
+    }
+
     var isPanning = false
     var lastPanLocation: NSPoint = .zero
     var handPanMode = false
@@ -809,6 +819,7 @@ private final class SceneKitMapNSView: NSView {
             installRightClickMonitor()
             syncPanInputMonitors()
         } else {
+            stopScene()
             removeKeyMonitor()
             removeRightClickMonitor()
             removeTrackpadMonitors()
@@ -1513,7 +1524,7 @@ private func buildPadOverlayColor(_ cell: MapCell, row: Int, col: Int) -> [Float
         return [0.62, 0.62, 0.66]
     case .wood, nil:
         if cell.povrsina == .plodna { return [0.16, 0.68, 0.22] }
-        if cell.povrsina == .trava { return [0.38, 0.58, 0.24] }
+        if cell.povrsina == .tlo { return [0.38, 0.58, 0.24] }
         return nil
     }
 }
@@ -2116,6 +2127,7 @@ struct SceneKitMapView: NSViewRepresentable {
             scnView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
         ])
         container.scnView = scnView
+        NotificationCenter.default.addObserver(container, selector: #selector(SceneKitMapNSView.stopScene), name: .feudalismStopMapScene, object: nil)
 
         scnView.wantsLayer = true
         scnView.layer?.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
@@ -2139,6 +2151,7 @@ struct SceneKitMapView: NSViewRepresentable {
         setupSceneAndTerrain(into: scene, loader: loader, terrainTexture: terrainTextureOnMainThread)
 
         let coord = context.coordinator
+        container.onWillDetach = { [weak coord] in coord?.retired = true }
         let zoom = gameState.mapCameraSettings.currentZoom
         let div40 = gridDivisionsBuilding(rows: rows, cols: cols)
         let div10 = gridDivisionsDisplay(rows: rows, cols: cols)
@@ -3729,11 +3742,17 @@ struct SceneKitMapView: NSViewRepresentable {
         Coordinator()
     }
 
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.retired = true
+        (nsView as? SceneKitMapNSView)?.stopScene()
+    }
+
     private static let zoomLerpFactor: CGFloat = 0.18
     /// Visina kamere u metrima pri zoomu 1. Zoom 8 gleda oko dvorca, ne cijelu mapu s visine.
     private static let cameraBaseHeight: CGFloat = 80
 
     class Coordinator: NSObject, SCNSceneRendererDelegate {
+        var retired = false
         var scene: SCNScene?
         var placementsNode: SCNNode?
         var seatsNode: SCNNode?
@@ -3794,6 +3813,7 @@ struct SceneKitMapView: NSViewRepresentable {
         var warehouseStockKey = ""
 
         func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
+            guard !retired, gameState?.isShowingMainMenu != true else { return }
             PerformanceMonitor.shared.noteFrame(at: time)
             guard let cam = cameraNode, let target = cameraTarget else { return }
             let targetZoom: CGFloat

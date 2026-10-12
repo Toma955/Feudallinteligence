@@ -48,6 +48,8 @@ struct MainMenuView: View {
     @State private var soloImportTick = 0
     @State private var aboutShowHowTo = false
     @State private var aboutInfoTick = 0
+    @ObservedObject private var playback = RecordingPlayback.shared
+    @ObservedObject private var trainingSession = TrainingSession.shared
 
     var body: some View {
         ZStack {
@@ -129,9 +131,9 @@ struct MainMenuView: View {
             .animation(.easeInOut(duration: menuPostavkeTransitionDuration), value: islandPage)
             .padding(.horizontal, isHomeDock ? 24 : 48)
             .padding(.top, isHomeDock ? 88 : 48)
-            .padding(.bottom, showSoloSetup ? 0 : (isHomeDock ? 36 : 48))
+            .padding(.bottom, islandPage == .history || islandPage == .training ? 100 : (showSoloSetup ? 0 : (isHomeDock ? 36 : 48)))
 
-            if !hideTitle {
+            if !hideTitle, islandPage != .history, islandPage != .training {
                 if islandExpanded {
                     Color.clear
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -163,6 +165,16 @@ struct MainMenuView: View {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .padding(.top, titleTopPadding)
+            }
+            if !hideTitle, islandPage == .history {
+                recordingDock
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 22)
+            }
+            if !hideTitle, islandPage == .training {
+                trainingDock
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 22)
             }
         }
         .sheet(isPresented: $showGameSetup) {
@@ -222,6 +234,7 @@ struct MainMenuView: View {
     }
 
     private func openIslandPage(_ page: MenuIslandPage) {
+        if page == .history || page == .training { islandExpanded = false }
         withAnimation(.easeInOut(duration: menuPostavkeTransitionDuration)) {
             showPostavke = false
             showSoloSetup = false
@@ -247,6 +260,9 @@ struct MainMenuView: View {
             }
             dockTile(title: L("menu_ai_lords"), icon: "person.3.fill", id: "menu_ai_lords") {
                 withAnimation(.easeInOut(duration: menuPostavkeTransitionDuration)) { showAILords = true }
+            }
+            dockTile(title: "Učitaj", icon: "square.and.arrow.down", id: "menu_load") {
+                withAnimation(.easeInOut(duration: menuPostavkeTransitionDuration)) { openIslandPage(.saves) }
             }
             dockTile(title: L("menu_map_editor"), icon: "map.fill", id: "menu_map_editor") {
                 AudioManager.shared.stopIntroSoundtrack()
@@ -285,14 +301,28 @@ struct MainMenuView: View {
     }
 
     private var islandPageContent: some View {
-        VStack(spacing: islandPage == .history ? 10 : 18) {
-            menuBackHeader(titleKey: islandPage.titleKey, language: gameState.appLanguage) {
-                withAnimation(.easeInOut(duration: menuPostavkeTransitionDuration)) {
-                    islandPage = .none
+        VStack(spacing: islandPage == .history || islandPage == .saves ? 10 : 18) {
+            if islandPage != .history && islandPage != .training {
+                menuBackHeader(titleKey: islandPage.titleKey, language: gameState.appLanguage) {
+                    withAnimation(.easeInOut(duration: menuPostavkeTransitionDuration)) {
+                        islandPage = .none
+                    }
                 }
             }
             if islandPage == .history {
                 MatchHistoryView()
+                    .environmentObject(gameState)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if islandPage == .saves {
+                SavedGamesView {
+                    withAnimation(.easeInOut(duration: menuPostavkeTransitionDuration)) {
+                        islandPage = .none
+                    }
+                }
+                .environmentObject(gameState)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if islandPage == .training {
+                AITrainingView()
                     .environmentObject(gameState)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -307,6 +337,103 @@ struct MainMenuView: View {
                 Spacer(minLength: 8)
             }
         }
+    }
+
+    private var trainingDock: some View {
+        let count = trainingSession.selectedLords.count
+        return VStack(spacing: 6) {
+            HStack(spacing: 8) {
+                recordingButton("Natrag", "chevron.backward", on: false) {
+                    withAnimation(.easeInOut(duration: menuPostavkeTransitionDuration)) { islandPage = .none }
+                }
+                if count > 0 {
+                    ForEach(TrainingMode.allCases) { item in
+                        trainingModeButton(item)
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.22), lineWidth: 1))
+            Text("Izabrano: \(count)")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.8))
+        }
+    }
+
+    private func trainingModeButton(_ item: TrainingMode) -> some View {
+        let on = trainingSession.mode == item
+        let percent = trainingSession.percent(for: item)
+        return Button {
+            guard !trainingSession.training else { return }
+            trainingSession.mode = item
+        } label: {
+            VStack(spacing: 1) {
+                HStack(spacing: 6) {
+                    Image(systemName: item.icon)
+                        .font(.system(size: 13, weight: .semibold))
+                    Text(item.title)
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                Text("\(percent)%")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+            }
+            .foregroundStyle(on ? .black : .white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(on ? Color.yellow : Color.white.opacity(0.1), in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var recordingDock: some View {
+        HStack(spacing: 8) {
+            recordingButton("Natrag", "chevron.backward", on: false) {
+                playback.pane = .maps
+                playback.gui = false
+                withAnimation(.easeInOut(duration: menuPostavkeTransitionDuration)) { islandPage = .none }
+            }
+            recordingButton("Prethodni", "chevron.left", on: false) { playback.previous() }
+            recordingButton("Sljedeći", "chevron.right", on: false) { playback.next() }
+            recordingButton("Prikaz", "rectangle.split.3x1", on: playback.gui && playback.pane == .maps) {
+                if playback.pane != .maps {
+                    playback.pane = .maps
+                    playback.gui = true
+                } else {
+                    playback.gui.toggle()
+                }
+            }
+            recordingButton("Graf", "chart.xyaxis.line", on: playback.pane == .graph) {
+                playback.pane = playback.pane == .graph ? .maps : .graph
+            }
+            recordingButton("Resursi", "shippingbox.fill", on: playback.pane == .resources) {
+                playback.pane = playback.pane == .resources ? .maps : .resources
+            }
+            recordingButton("Partije", "list.bullet", on: playback.showMatchList) {
+                playback.showMatchList.toggle()
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.22), lineWidth: 1))
+    }
+
+    private func recordingButton(_ title: String, _ icon: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .foregroundStyle(on ? .black : .white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(on ? Color.yellow : Color.white.opacity(0.1), in: Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     private var embeddedPostavkeContent: some View {
@@ -388,7 +515,9 @@ struct MainMenuView: View {
         if showSoloSetup { return soloPanelWidth }
         if showAILords { return 1180 }
         if showAbout { return 1500 }
-        if islandPage == .history { return historyPanelWidth }
+        if islandPage == .history { return 1760 }
+        if islandPage == .saves { return historyPanelWidth }
+        if islandPage == .training { return historyPanelWidth }
         if islandPage != .none { return 720 }
         if showMapEditorChoice || showCampaign { return 980 }
         return menuPanelMaxWidth
@@ -398,10 +527,12 @@ struct MainMenuView: View {
         if showPostavke { return postavkePanelMaxHeight }
         if showSoloSetup { return soloPanelHeight }
         if showAILords { return 820 }
-        if showCampaign { return 560 }
+        if showCampaign { return historyPanelHeight }
         if showAbout { return 860 }
         if showMapEditorChoice { return 520 }
-        if islandPage == .history { return historyPanelHeight }
+        if islandPage == .history { return 980 }
+        if islandPage == .saves { return historyPanelHeight }
+        if islandPage == .training { return historyPanelHeight }
         if islandPage != .none { return 360 }
         return menuPanelMaxHeight
     }
@@ -508,6 +639,7 @@ private enum MenuIslandPage: Equatable {
     case multiplayer
     case training
     case history
+    case saves
     case friends
 
     var titleKey: String {
@@ -516,6 +648,7 @@ private enum MenuIslandPage: Equatable {
         case .multiplayer: return "island_multiplayer"
         case .training: return "island_training"
         case .history: return "island_history"
+        case .saves: return "island_saves"
         case .friends: return "island_friends"
         }
     }
@@ -525,7 +658,8 @@ private enum MenuIslandPage: Equatable {
         case .none: return "circle"
         case .multiplayer: return "person.2.fill"
         case .training: return "sportscourt.fill"
-        case .history: return "clock.arrow.circlepath"
+        case .history: return "text.alignleft"
+        case .saves: return "square.and.arrow.down"
         case .friends: return "person.crop.circle.badge.plus"
         }
     }

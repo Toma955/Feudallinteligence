@@ -14,6 +14,7 @@ final class MatchHistoryStore: ObservableObject {
     @Published private(set) var summaries: [MatchHistorySummary] = []
 
     private var draft: MatchHistoryRecord?
+    private var events: [MatchTimelineEvent] = []
     private let frameInterval = 5
     private let maxStoredMatches = 80
     private let encoder: JSONEncoder = {
@@ -37,8 +38,9 @@ final class MatchHistoryStore: ObservableObject {
         return loadRecord(id: id)
     }
 
-    func beginRecording(from state: GameState) {
+    func beginRecording(from state: GameState, forced: Bool = false) {
         guard !state.isMapEditorMode, state.isLevelReady, !state.isShowingMainMenu else { return }
+        guard state.recordThisMatch || forced else { return }
         guard state.gameMap.rows > 0, state.gameMap.cols > 0 else { return }
         guard draft == nil else { return }
 
@@ -69,6 +71,67 @@ final class MatchHistoryStore: ObservableObject {
         persistDraft()
     }
 
+    /// Gumb Snimi partiju: odmah zapiše četiri mape, partija se nastavlja.
+    func captureNow(from state: GameState) -> String {
+        if draft == nil { beginRecording(from: state, forced: true) }
+        guard draft != nil else { return "Snimanje još nije spremno." }
+        appendFrame(from: state, force: true)
+        persistDraft()
+        return "Partija je snimljena. Četiri mape su spremljene."
+    }
+
+    /// Građevina je pala na mapu: sekunda, koordinata, populacija i sreća u tom trenu.
+    func noteBuild(from state: GameState, name: String, row: Int, col: Int) {
+        if draft == nil { beginRecording(from: state) }
+        guard draft != nil else { return }
+        let actor = recordedActor(from: state)
+        let people = peopleNow(in: state, actor: actor)
+        let action = "izgradio \(name) · populacija \(people.population) · sreća \(people.happiness)%"
+        recordDecision(actor: actor, second: max(0, state.currentTurn - 1), action: action, row: row, col: col, population: people.population, happiness: people.happiness)
+        events.append(MatchTimelineEvent(
+            id: UUID().uuidString,
+            second: max(0, state.currentTurn - 1),
+            turn: state.currentTurn,
+            action: action,
+            row: row,
+            col: col,
+            gold: state.resources.gold,
+            wood: state.resources.wood,
+            stone: state.resources.stone,
+            iron: state.resources.iron,
+            food: state.food,
+            population: people.population,
+            happiness: people.happiness
+        ))
+        appendFrame(from: state, force: true)
+        persistDraft()
+    }
+
+    /// Kako je AI lord razmišljao i što je iz toga napravio.
+    func noteThought(from state: GameState, lord: String, text: String, row: Int, col: Int) {
+        guard draft != nil else { return }
+        let people = peopleNow(in: state, actor: lord)
+        let action = "\(text) · populacija \(people.population) · sreća \(people.happiness)%"
+        recordDecision(actor: lord, second: max(0, state.currentTurn - 1), action: action, row: row, col: col, population: people.population, happiness: people.happiness)
+        events.append(MatchTimelineEvent(
+            id: UUID().uuidString,
+            second: max(0, state.currentTurn - 1),
+            turn: state.currentTurn,
+            action: "\(lord): \(action)",
+            row: row,
+            col: col,
+            gold: state.resources.gold,
+            wood: state.resources.wood,
+            stone: state.resources.stone,
+            iron: state.resources.iron,
+            food: state.food,
+            population: people.population,
+            happiness: people.happiness
+        ))
+        appendFrame(from: state, force: true)
+        persistDraft()
+    }
+
     func recordTick(from state: GameState) {
         guard draft != nil else { return }
         let turn = state.currentTurn
@@ -89,6 +152,7 @@ final class MatchHistoryStore: ObservableObject {
         record.players = makePlayers(from: state)
         record.title = makeTitle(players: record.players, kind: record.kind, map: record.mapLabel)
         draft = nil
+        events = []
         guard !record.frames.isEmpty else { return }
         save(record)
     }
@@ -162,10 +226,53 @@ final class MatchHistoryStore: ObservableObject {
         summaries = Array(summaries.prefix(maxStoredMatches))
     }
 
-    private func appendFrame(from state: GameState) {
+    private func recordDecision(actor: String, second: Int, action: String, row: Int, col: Int, population: Int, happiness: Int) {
         guard var record = draft else { return }
-        if record.frames.last?.turn == state.currentTurn { return }
-        record.frames.append(TextMapCapture.captureFrame(from: state))
+        var list = record.decisions ?? []
+        list.append(MatchDecision(
+            id: UUID().uuidString,
+            second: second,
+            actor: actor,
+            action: action,
+            row: row,
+            col: col,
+            population: population,
+            happiness: happiness
+        ))
+        record.decisions = list
+        draft = record
+    }
+
+    private func peopleNow(in state: GameState, actor: String) -> (population: Int, happiness: Int) {
+        let faction = factionId(in: state, actor: actor)
+        let pop = faction.map { state.population(of: $0) } ?? state.playerPopulation
+        let happy = Int((faction.map { state.happinessPercent(of: $0) } ?? state.playerHappiness).rounded())
+        return (pop, happy)
+    }
+
+    private func factionId(in state: GameState, actor: String) -> String? {
+        if let realm = state.realms.first(where: { $0.name == actor }) {
+            return state.realmSeats.seats.first { $0.realmIds.contains(realm.id) || $0.id == realm.id }?.id ?? realm.id
+        }
+        if let seat = state.realmSeats.seats.first(where: { $0.displayName == actor || $0.id == actor }) {
+            return seat.id
+        }
+        return state.playerSeat?.id
+    }
+
+    /// Ime onoga tko je upravo nešto napravio, isto kao u popisu igrača snimke.
+    private func recordedActor(from state: GameState) -> String {
+        if !state.realms.isEmpty, let human = state.realms.first(where: \.isPlayerControlled) {
+            return human.name
+        }
+        if let seat = state.playerSeat { return seat.displayName }
+        return "Igrač"
+    }
+
+    private func appendFrame(from state: GameState, force: Bool = false) {
+        guard var record = draft else { return }
+        if !force, record.frames.last?.turn == state.currentTurn { return }
+        record.frames.append(TextMapCapture.captureFrame(from: state, events: events))
         draft = record
     }
 

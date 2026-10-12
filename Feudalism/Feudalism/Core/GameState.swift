@@ -5,7 +5,10 @@
 //  Globalno stanje igre – krajevi (realmi), resursi, potezi. Jedan kralj = solo; više = dok zadnji ne ostane.
 //
 
-import Foundation
+extension Notification.Name {
+    /// Mapa mora stati s crtanjem prije nego se vrati glavni izbornik.
+    static let feudalismStopMapScene = Notification.Name("Feudalism.stopMapScene")
+}
 import SwiftUI
 import AppKit
 import Combine
@@ -162,6 +165,8 @@ enum GameMode {
 final class GameState: ObservableObject {
     /// true = glavni izbornik (Nova igra / Postavke / Izlaz), false = igra (karta).
     @Published var isShowingMainMenu: Bool = true
+    /// Uključeno gumbom Snimi prije solo graditelja, kampanje ili međusobne partije.
+    @Published var recordThisMatch: Bool = false
     /// true = Map Editor (uređivanje mape), ne igra.
     @Published var isMapEditorMode: Bool = false
     /// Solo graditelj: nema vojne/ekonomske pobjede. Građevine ostaju.
@@ -932,6 +937,7 @@ final class GameState: ObservableObject {
 
     /// Prikaži glavni izbornik (nazad iz igre).
     func showMainMenu() {
+        NotificationCenter.default.post(name: .feudalismStopMapScene, object: nil)
         MatchHistoryStore.shared.finishRecording(from: self)
         isGamePaused = false
         leaveUnderground()
@@ -980,6 +986,10 @@ final class GameState: ObservableObject {
         AudioManager.shared.playMapMusicIfAvailable(volume: effectiveMusicVolume)
     }
 
+    func captureMatchRecording() -> String {
+        MatchHistoryStore.shared.captureNow(from: self)
+    }
+
     /// Zadnje auto-spremanje (Application Support/Feudalism/saves/auto.json).
     func saveMatch(elapsedSeconds: Int) -> String {
         do {
@@ -1024,6 +1034,39 @@ final class GameState: ObservableObject {
         let folder = base.appendingPathComponent("Feudalism/saves", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         return folder
+    }
+
+    func savedMatchEntries() -> [SavedMatchEntry] {
+        guard let folder = Self.matchSavesDirectory() else { return [] }
+        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        return files
+            .filter { $0.pathExtension.lowercased() == "json" }
+            .sorted {
+                let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return a > b
+            }
+            .compactMap { url -> SavedMatchEntry? in
+                guard let data = try? Data(contentsOf: url),
+                      let save = try? JSONDecoder().decode(SoloMatchSave.self, from: data) else { return nil }
+                let fileName = url.deletingPathExtension().lastPathComponent
+                let name = (save.mapName?.isEmpty == false ? save.mapName! : (fileName == "auto" ? "Automatska" : fileName))
+                let marks = save.placements.map { placement in
+                    CGPoint(
+                        x: Double(placement.col) / Double(max(1, save.cols)),
+                        y: Double(placement.row) / Double(max(1, save.rows))
+                    )
+                }
+                return SavedMatchEntry(url: url, name: name, rows: save.rows, cols: save.cols, marks: marks)
+            }
+    }
+
+    func continueSavedMatch(at url: URL) {
+        let result = loadMatch(from: url)
+        guard result.message == "Partija je učitana." else { return }
+        isMapEditorMode = false
+        isLevelReady = false
+        isShowingMainMenu = false
     }
 
     private func makeMatchSave(elapsedSeconds: Int) -> SoloMatchSave {
@@ -1277,6 +1320,9 @@ final class GameState: ObservableObject {
             newRealms.append(computer)
         }
         setRealms(newRealms)
+        if selectedAIProfileIds.count >= 2 {
+            recordThisMatch = true
+        }
         matchPresentation = presentation ?? (includeHuman ? .graphics : .simulator)
         setMapSize(mapSize)
         currentLevelName = soloLevelName
@@ -1500,6 +1546,10 @@ extension GameState {
             AudioManager.shared.playSound(named: "place", volume: effectiveSoundsVolume)
         }
         placementDebugLog("SUCCESS object=\(objectId) row=\(row) col=\(col)")
+        if !isMapEditorMode {
+            let name = ObjectCatalog.shared.object(id: objectId)?.name ?? objectId
+            MatchHistoryStore.shared.noteBuild(from: self, name: name, row: row, col: col)
+        }
         return true
     }
 
@@ -1527,10 +1577,16 @@ extension GameState {
         objectWillChange.send()
     }
 
+    func notePlacementsChanged() {
+        placementsVersion += 1
+        objectWillChange.send()
+    }
+
     /// Jedan production tick: proizvođači dodaju na stockpile; transformeri (pivovara, krčma, hotel) nakon vremena uzimaju input i dodaju output.
     func tickProduction() {
         guard !isGamePaused, !isMapEditorMode, isLevelReady, !isShowingMainMenu else { return }
         tickPeople()
+        tickAILords()
         tickFood()
         tickHappiness()
         tickBuildings()
@@ -1963,18 +2019,19 @@ extension GameState {
         for coord in brushCoordinates(centerRow: centerRow, centerCol: centerCol, brushOption: brushOption) {
             switch pad {
             case .trava:
-                gameMap.setSurface(at: coord, .trava)
+                gameMap.setSurface(at: coord, .tlo)
                 gameMap.setDeposit(at: coord, nil)
             case .plodna:
                 gameMap.setSurface(at: coord, .plodna)
             case .kamen:
                 gameMap.setDeposit(at: coord, .stone)
             case .zeljezo:
+                gameMap.setSurface(at: coord, .zeljezo)
                 gameMap.setDeposit(at: coord, .iron)
             case .obrisi:
                 gameMap.setDeposit(at: coord, nil)
-                if let surface = gameMap.cell(row: coord.row, col: coord.col)?.povrsina, surface == .plodna || surface == .trava {
-                    gameMap.setSurface(at: coord, .poluplodna)
+                if let surface = gameMap.cell(row: coord.row, col: coord.col)?.povrsina, surface == .plodna || surface == .zeljezo {
+                    gameMap.setSurface(at: coord, .tlo)
                 }
             }
         }
@@ -2082,6 +2139,16 @@ extension GameState {
         editorState.objectWillChange.send()
         objectWillChange.send()
     }
+}
+
+struct SavedMatchEntry: Identifiable, Equatable {
+    var id: String { url.path }
+    var url: URL
+    var name: String
+    var rows: Int
+    var cols: Int
+    /// Točke građevina, 0…1 po širini i visini.
+    var marks: [CGPoint]
 }
 
 private struct SoloMatchSave: Codable {

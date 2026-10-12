@@ -116,6 +116,84 @@ final class AILordProfileStore: ObservableObject {
         updateProfile(p)
     }
 
+    /// Svaki odabrani lord pročita iste lekcije i upiše ih u svoj level.
+    @discardableResult
+    func train(profileIds: [String], lessons: [AIMatchLesson], matchIds: [String]) -> [AITrainingNote] {
+        var notes: [AITrainingNote] = []
+        var pages = notebook.pages
+        for lesson in lessons {
+            pages.append(AILordNotebookPage(
+                title: lesson.title,
+                note: lesson.detail,
+                matchId: matchIds.joined(separator: ",")
+            ))
+        }
+        notebook.pages = Array(pages.suffix(80))
+
+        for id in profileIds {
+            guard var profile = profile(id: id), var levelWeights = weights[profile.levelId] else { continue }
+            for lesson in lessons {
+                let applied = lesson.delta * styleScale(profile, trait: lesson.trait)
+                levelWeights.nudgeTrait(lesson.trait, by: applied)
+                notes.append(AITrainingNote(lordId: profile.id, lordName: profile.name, lesson: lesson, applied: applied))
+            }
+            weights[profile.levelId] = levelWeights
+            AILordWeightsStore.save(levelWeights)
+            profile.modelVersion += 1
+            profile.experienceLevel = min(99, profile.experienceLevel + 1)
+            if let index = levels.firstIndex(where: { $0.id == profile.levelId }) {
+                levels[index].value = min(100, levels[index].value + Double(lessons.count) * 0.4)
+            }
+            updateProfile(profile)
+        }
+        save()
+        return notes
+    }
+
+    /// Jedan korak treninga. Zadnji korak upiše inačicu, level i bilježnicu.
+    func absorb(profileIds: [String], lessons: [AIMatchLesson], fraction: Float, commit: Bool) {
+        if commit {
+            var pages = notebook.pages
+            for lesson in lessons {
+                pages.append(AILordNotebookPage(title: lesson.title, note: lesson.detail, matchId: ""))
+            }
+            notebook.pages = Array(pages.suffix(80))
+        }
+        for id in profileIds {
+            guard var profile = profile(id: id), var levelWeights = weights[profile.levelId] else { continue }
+            for lesson in lessons {
+                let step = lesson.delta * styleScale(profile, trait: lesson.trait) * fraction
+                levelWeights.nudgeTrait(lesson.trait, by: step)
+            }
+            weights[profile.levelId] = levelWeights
+            if commit {
+                AILordWeightsStore.save(levelWeights)
+                profile.modelVersion += 1
+                profile.experienceLevel = min(99, profile.experienceLevel + 1)
+                if let index = levels.firstIndex(where: { $0.id == profile.levelId }) {
+                    levels[index].value = min(100, levels[index].value + Double(lessons.count) * 0.4)
+                }
+                updateProfile(profile)
+            }
+        }
+        if commit { save() }
+    }
+
+    private func styleScale(_ profile: AILordProfile, trait: String) -> Float {
+        switch (profile.fightingStyle, trait) {
+        case (.aggressive, "aggression"), (.aggressive, "army_size"), (.raider, "army_size"), (.raider, "aggression"):
+            return 1.45
+        case (.defensive, "defense"), (.defensive, "patience"):
+            return 1.45
+        case (.economic, "economy"), (.economic, "food_reserve"), (.economic, "expansion"):
+            return 1.45
+        case (.diplomat, "diplomacy"), (.diplomat, "patience"):
+            return 1.35
+        default:
+            return 1
+        }
+    }
+
     /// Dodaj novi profil (npr. custom bot).
     func addProfile(_ profile: AILordProfile) {
         guard !profiles.contains(where: { $0.id == profile.id }) else { return }

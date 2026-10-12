@@ -17,6 +17,7 @@ struct GameSetupView: View {
     @State private var selectedAIProfileIds: Set<String> = []
     /// Čovjek u partiji = mapa. Isključeno = AI protiv AI, samo tekst.
     @State private var humanPlays = true
+    @State private var showRecordings = false
 
     private let humanColorOptions: [(String, String)] = [
         ("2E86AB", "Plava"),
@@ -27,6 +28,29 @@ struct GameSetupView: View {
     ]
 
     var body: some View {
+        if showRecordings {
+            VStack(spacing: 10) {
+                HStack {
+                    Button { showRecordings = false } label: {
+                        Label("Natrag", systemImage: "chevron.backward")
+                            .foregroundStyle(.white)
+                    }
+                    .buttonStyle(.plain)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                MatchHistoryView()
+                    .environmentObject(gameState)
+            }
+            .frame(minWidth: 900, minHeight: 640)
+            .padding(12)
+        } else {
+            setupForm
+        }
+    }
+
+    private var setupForm: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
@@ -111,6 +135,9 @@ struct GameSetupView: View {
                             .font(.system(size: 13))
                             .foregroundStyle(.white.opacity(0.65))
                     }
+
+                    MatchRecordBar { showRecordings = true }
+                        .padding(.top, 8)
 
                     Button(action: startGame) {
                         Text("Pokreni igru")

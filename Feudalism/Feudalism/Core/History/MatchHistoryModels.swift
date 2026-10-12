@@ -46,6 +46,34 @@ struct MatchHistorySummary: Codable, Identifiable, Hashable {
     }
 }
 
+struct MatchTimelineEvent: Codable, Equatable, Identifiable {
+    var id: String
+    var second: Int
+    var turn: Int
+    var action: String
+    var row: Int
+    var col: Int
+    var gold: Int
+    var wood: Int
+    var stone: Int
+    var iron: Int
+    var food: Int
+    var population: Int? = nil
+    var happiness: Int? = nil
+}
+
+/// Jedna odluka u snimci: tko, u kojoj sekundi, što.
+struct MatchDecision: Codable, Equatable, Identifiable {
+    var id: String
+    var second: Int
+    var actor: String
+    var action: String
+    var row: Int
+    var col: Int
+    var population: Int? = nil
+    var happiness: Int? = nil
+}
+
 struct MatchHistoryFrame: Codable, Identifiable {
     var id: String
     var turn: Int
@@ -53,6 +81,33 @@ struct MatchHistoryFrame: Codable, Identifiable {
     var underground: String
     var buildings: String
     var army: String
+    /// Vrijeme, resursi i koordinate poteza do ovog okvira.
+    var timeline: String
+    /// Visine sjecišta. Samo GUI, ne za trening ni AI.
+    var heightMap: String
+
+    init(id: String, turn: Int, main: String, underground: String, buildings: String, army: String, timeline: String = "", heightMap: String = "") {
+        self.id = id
+        self.turn = turn
+        self.main = main
+        self.underground = underground
+        self.buildings = buildings
+        self.army = army
+        self.timeline = timeline
+        self.heightMap = heightMap
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        turn = try c.decode(Int.self, forKey: .turn)
+        main = try c.decode(String.self, forKey: .main)
+        underground = try c.decode(String.self, forKey: .underground)
+        buildings = try c.decode(String.self, forKey: .buildings)
+        army = try c.decode(String.self, forKey: .army)
+        timeline = try c.decodeIfPresent(String.self, forKey: .timeline) ?? ""
+        heightMap = try c.decodeIfPresent(String.self, forKey: .heightMap) ?? ""
+    }
 }
 
 struct MatchHistoryRecord: Codable, Identifiable {
@@ -70,6 +125,8 @@ struct MatchHistoryRecord: Codable, Identifiable {
     var players: [MatchHistoryPlayer]
     var result: String?
     var frames: [MatchHistoryFrame]
+    /// Odluke svih koji se snimaju. Stare snimke nemaju ovo polje.
+    var decisions: [MatchDecision]? = nil
 
     var summary: MatchHistorySummary {
         MatchHistorySummary(

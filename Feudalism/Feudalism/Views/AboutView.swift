@@ -26,7 +26,7 @@ private enum AboutGoodsKind: String, CaseIterable, Identifiable {
         switch self {
         case .resources: return [.plank, .iron, .stone]
         case .food: return [.appleBasket, .cheese, .meat, .bread, .eggBasket, .chicken, .corn, .grapes, .banana, .vegetables, .spices, .wine, .sausages]
-        case .weapons: return []
+        case .weapons: return [.sword, .shield, .spear, .bow, .arrow, .crossbow, .mace, .leather]
         }
     }
 }
@@ -55,7 +55,8 @@ struct AboutView: View {
     @Binding var showHowTo: Bool
     var infoTick: Int
     @State private var category: ObjectCategory = .farme
-    @State private var goodsKind: AboutGoodsKind?
+    @State private var goodsKind: AboutGoodsKind = .resources
+    @State private var showSoldiers = false
 
     private var language: AppLanguage { gameState.appLanguage }
 
@@ -129,42 +130,29 @@ struct AboutView: View {
                             padCard(pad)
                         }
                     }
+                    itemsBlock
                     VStack(alignment: .leading, spacing: 10) {
                         Text(AboutSection.buildings.title(language))
                             .font(.custom("Georgia", size: 20))
                             .foregroundStyle(.white.opacity(0.95))
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 8) {
-                                ForEach(AboutGoodsKind.allCases) { kind in
-                                    goodsButton(kind)
-                                }
                                 ForEach(visibleCategories) { cat in
                                     categoryButton(cat)
                                 }
+                                soldiersButton
                             }
                         }
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 14)], spacing: 14) {
-                            if let goodsKind {
-                                if goodsKind.items.isEmpty {
-                                    Text("Za sada prazno.")
-                                        .font(.system(size: 14))
-                                        .foregroundStyle(.white.opacity(0.7))
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(.vertical, 8)
-                                }
-                                ForEach(goodsKind.items) { item in
-                                    goodCard(item)
+                            if showSoldiers {
+                                ForEach(SoldierType.allCases) { type in
+                                    soldierCard(type)
                                 }
                             } else {
                                 ForEach(buildingsInCategory, id: \.id) { object in
                                     buildingCard(object)
                                 }
                             }
-                        }
-                    }
-                    sectionBlock(AboutSection.soldiers.title(language)) {
-                        ForEach(SoldierType.allCases) { type in
-                            soldierCard(type)
                         }
                     }
                     informationBlock
@@ -210,6 +198,38 @@ struct AboutView: View {
         .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
     }
 
+    /// Resursi, hrana i oružje: cijeli popis predmeta u igri, odvojen od građevina.
+    private var itemsBlock: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Svi predmeti igre")
+                .font(.custom("Georgia", size: 22))
+                .foregroundStyle(.white.opacity(0.98))
+            Text("Resursi, hrana i oružje. Ovo je cijeli popis predmeta u igri.")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.yellow.opacity(0.95))
+                .fixedSize(horizontal: false, vertical: true)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(AboutGoodsKind.allCases) { kind in
+                        goodsButton(kind)
+                    }
+                }
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 14)], spacing: 14) {
+                ForEach(goodsKind.items) { item in
+                    goodCard(item)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.yellow.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.yellow.opacity(0.45), lineWidth: 1)
+        )
+    }
+
     private func goodsButton(_ kind: AboutGoodsKind) -> some View {
         let selected = goodsKind == kind
         return Button {
@@ -239,9 +259,9 @@ struct AboutView: View {
     }
 
     private func categoryButton(_ cat: ObjectCategory) -> some View {
-        let selected = goodsKind == nil && (visibleCategories.contains(category) ? category == cat : cat == visibleCategories.first)
+        let selected = !showSoldiers && (visibleCategories.contains(category) ? category == cat : cat == visibleCategories.first)
         return Button {
-            goodsKind = nil
+            showSoldiers = false
             category = cat
         } label: {
             Text(cat.rawValue)
@@ -250,6 +270,20 @@ struct AboutView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
                 .background(selected ? Color.white.opacity(0.2) : Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var soldiersButton: some View {
+        Button {
+            showSoldiers = true
+        } label: {
+            Text(AboutSection.soldiers.title(language))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(showSoldiers ? .yellow : .white.opacity(0.88))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(showSoldiers ? Color.white.opacity(0.2) : Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
     }

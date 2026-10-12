@@ -875,7 +875,8 @@ struct ContentView: View {
                     .foregroundStyle(.white)
                     .padding(.bottom, 6)
                 pauseMenuButton("Nastavi", action: resumeFromPause)
-                pauseMenuButton("Spremi", action: presentSaveMatchPanel)
+                pauseMenuButton("Snimi partiju", action: recordMatchSnapshot)
+                pauseMenuButton("Spremi partiju", action: presentSaveMatchPanel)
                 pauseMenuButton("Učitaj", action: presentLoadMatchPanel)
                 pauseMenuButton("Ponovno pokreni") {
                     pausedAt = nil
@@ -927,6 +928,10 @@ struct ContentView: View {
         showPauseMenu = false
         pauseMessage = nil
         gameState.resumeGame()
+    }
+
+    private func recordMatchSnapshot() {
+        pauseMessage = gameState.captureMatchRecording()
     }
 
     private func presentSaveMatchPanel() {

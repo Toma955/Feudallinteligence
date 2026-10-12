@@ -16,6 +16,10 @@ struct LoadedGameAssets {
     var level: LoadedLevel?
     /// Učitani 3D čvorovi za svaki placeable objectId (za template/ghost).
     var placementNodes: [String: SCNNode] = [:]
+    /// About: resursi i hrana, ključ je AboutGoodKind.rawValue.
+    var goodNodes: [String: SCNNode] = [:]
+    /// About: vojnici, ključ je SoldierType.rawValue.
+    var soldierNodes: [String: SCNNode] = [:]
 }
 
 /// Paralelni loader s progressom. Pokreni pri startu igre (npr. IntroView).
@@ -52,78 +56,127 @@ final class GameAssetLoader: ObservableObject {
         await task.value
     }
 
-    /// Jednom paralelno učitaj sve: teren, level, svi modeli. Progress i status ažuriraju se na MainActor.
+    /// Učitaj teren, level i sve 3D prikaze. Izbornik čeka ovaj kraj, ne samo animaciju naslova.
     func loadAll() async {
         await MainActor.run {
             loadStatus = "Priprema…"
             loadProgress = 0
         }
 
-        let totalSteps = 2 + SceneKitPlacementRegistry.placeableObjectIds.count
+        let objectIds = SceneKitPlacementRegistry.placeableObjectIds
+        let goods = AboutGoodKind.allCases
+        let soldiers = SoldierType.allCases
+        let pads = PadBrush.allCases.filter { $0 != .obrisi }
+        let total = 2 + objectIds.count + goods.count + soldiers.count + pads.count
         var completed = 0
 
-        func reportProgress() {
+        func tick(_ status: String) async {
             completed += 1
-            let p = Double(completed) / Double(totalSteps)
-            Task { @MainActor in
-                self.loadProgress = p
-                if completed < totalSteps {
-                    self.loadStatus = "Učitavanje… \(Int(p * 100))%"
-                }
+            let progress = Double(completed) / Double(max(1, total))
+            await MainActor.run {
+                self.loadProgress = progress
+                self.loadStatus = status
             }
+            await Task.yield()
         }
 
-        var terrainTexture: Any?
-        var level: LoadedLevel?
+        async let terrainTexture: Any? = Task.detached {
+            SceneKitMapView.createTerrainTextureForPreload()
+        }.value
+        async let level: LoadedLevel? = Task.detached {
+            if !UserDefaults.standard.bool(forKey: "Feudalism.didDeleteStaleSoloLevelForTextureFix") {
+                SceneKitLevelLoader.deleteSoloLevelFiles()
+                UserDefaults.standard.set(true, forKey: "Feudalism.didDeleteStaleSoloLevelForTextureFix")
+            }
+            return SceneKitLevelLoader.loadForSoloMode(bundleLevelName: "Level", bundle: .main)
+        }.value
+
+        let terrain = await terrainTexture
+        await tick("Teren")
+        let loadedLevel = await level
+        await tick("Mapa")
+
         var placementNodes: [String: SCNNode] = [:]
+        var goodNodes: [String: SCNNode] = [:]
+        var soldierNodes: [String: SCNNode] = [:]
 
-        await withTaskGroup(of: (String, Any?).self) { group in
-            group.addTask {
-                let t = SceneKitMapView.createTerrainTextureForPreload()
-                reportProgress()
-                return ("terrain", t)
+        for objectId in objectIds {
+            let name = ObjectCatalog.shared.object(id: objectId)?.name ?? objectId
+            let node = await MainActor.run { () -> SCNNode? in
+                guard let node = SceneKitPlacementRegistry.loadSceneKitNode(objectId: objectId, bundle: .main) else { return nil }
+                warmScene(node)
+                return node
             }
-            group.addTask {
-                if !UserDefaults.standard.bool(forKey: "Feudalism.didDeleteStaleSoloLevelForTextureFix") {
-                    SceneKitLevelLoader.deleteSoloLevelFiles()
-                    UserDefaults.standard.set(true, forKey: "Feudalism.didDeleteStaleSoloLevelForTextureFix")
-                }
-                let l = SceneKitLevelLoader.loadForSoloMode(bundleLevelName: "Level", bundle: .main)
-                reportProgress()
-                return ("level", l as Any?)
-            }
-            for objectId in SceneKitPlacementRegistry.placeableObjectIds {
-                group.addTask {
-                    let node = SceneKitPlacementRegistry.loadSceneKitNode(objectId: objectId, bundle: .main)
-                    reportProgress()
-                    return (objectId, node as Any?)
-                }
-            }
+            if let node { placementNodes[objectId] = node }
+            await tick("Građevina: \(name)")
+        }
 
-            for await (key, value) in group {
-                switch key {
-                case "terrain":
-                    terrainTexture = value
-                case "level":
-                    level = value as? LoadedLevel
-                default:
-                    if let node = value as? SCNNode {
-                        placementNodes[key] = node
-                    }
-                }
+        for good in goods {
+            let node = await MainActor.run { () -> SCNNode in
+                let node = GoodPreviewView.previewNode(good)
+                warmScene(node)
+                return node
             }
+            goodNodes[good.rawValue] = node
+            await tick(good.title)
+        }
+
+        for type in soldiers {
+            let node = await MainActor.run { () -> SCNNode in
+                let node = makeSoldierPreviewNode(type: type)
+                warmScene(node)
+                return node
+            }
+            soldierNodes[type.rawValue] = node
+            await tick("Vojnik: \(type.displayName)")
+        }
+
+        for pad in pads {
+            await MainActor.run {
+                let node = SCNNode(geometry: SCNBox(width: 1.2, height: 0.08, length: 1.2, chamferRadius: 0))
+                node.geometry?.firstMaterial?.diffuse.contents = NSColor(white: 0.4, alpha: 1)
+                warmScene(node)
+            }
+            await tick("Podloga: \(pad.rawValue)")
         }
 
         await MainActor.run {
+            warmer?.scene = nil
+            warmer = nil
             assets = LoadedGameAssets(
-                terrainTexture: terrainTexture,
-                level: level,
-                placementNodes: placementNodes
+                terrainTexture: terrain,
+                level: loadedLevel,
+                placementNodes: placementNodes,
+                goodNodes: goodNodes,
+                soldierNodes: soldierNodes
             )
             isLoaded = true
             loadProgress = 1
             loadStatus = "Gotovo"
         }
+    }
+
+    private var warmer: SCNView?
+
+    /// Jedan kadar kroz SceneKit da se model i materijali slože dok traje učitavanje.
+    private func warmScene(_ node: SCNNode) {
+        let view: SCNView
+        if let warmer {
+            view = warmer
+        } else {
+            let made = SCNView(frame: NSRect(x: 0, y: 0, width: 96, height: 96))
+            made.antialiasingMode = .multisampling4X
+            made.autoenablesDefaultLighting = true
+            made.rendersContinuously = false
+            warmer = made
+            view = made
+        }
+        let scene = SCNScene()
+        let clone = node.clone()
+        scene.rootNode.addChildNode(clone)
+        view.scene = scene
+        _ = view.snapshot()
+        clone.removeFromParentNode()
     }
 
     /// Dohvati učitani level (nil ako nije učitan ili nema mape).
@@ -134,6 +187,14 @@ final class GameAssetLoader: ObservableObject {
     /// Dohvati učitani placement čvor za objectId (nil ako nije učitan).
     func cachedPlacementNode(objectId: String) -> SCNNode? {
         assets.placementNodes[objectId]
+    }
+
+    func cachedGoodNode(_ id: String) -> SCNNode? {
+        assets.goodNodes[id]
+    }
+
+    func cachedSoldierNode(_ id: String) -> SCNNode? {
+        assets.soldierNodes[id]
     }
 
     /// Dohvati učitanu teksturu terena (nil ako nije učitana).

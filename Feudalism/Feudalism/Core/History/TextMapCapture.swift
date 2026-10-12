@@ -17,7 +17,7 @@ enum TextMapCapture {
         return max(1, Int(ceil(Double(side) / Double(maxVisionSide))))
     }
 
-    static func captureFrame(from state: GameState) -> MatchHistoryFrame {
+    static func captureFrame(from state: GameState, events: [MatchTimelineEvent] = []) -> MatchHistoryFrame {
         let maps = captureMaps(from: state)
         return MatchHistoryFrame(
             id: UUID().uuidString,
@@ -25,8 +25,61 @@ enum TextMapCapture {
             main: maps.main,
             underground: maps.underground,
             buildings: maps.buildings,
-            army: maps.army
+            army: maps.army,
+            timeline: timelineText(state: state, events: events),
+            heightMap: heightMap(from: state.gameMap)
         )
+    }
+
+    /// Visine točaka sjecišta. Nije za trening ni AI, samo za GUI.
+    static func heightMap(from map: GameMap) -> String {
+        guard map.rows > 0, map.cols > 0 else { return "" }
+        var lines: [String] = []
+        lines.reserveCapacity(map.rows + 1)
+        for row in 0...map.rows {
+            var cells: [String] = []
+            cells.reserveCapacity(map.cols + 1)
+            for col in 0...map.cols {
+                cells.append(heightText(map.vertexHeightAt(vertexRow: row, vertexCol: col)))
+            }
+            lines.append(cells.joined(separator: " "))
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func heightText(_ value: CGFloat) -> String {
+        let scaled = (Double(value) * 100).rounded() / 100
+        if abs(scaled - scaled.rounded()) < 0.001 { return String(Int(scaled.rounded())) }
+        return String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), scaled)
+    }
+
+    static func timelineText(state: GameState, events: [MatchTimelineEvent]) -> String {
+        let second = max(0, state.currentTurn - 1)
+        var lines = [
+            "\(second)s  potez \(state.currentTurn)",
+            resourceLine(gold: state.resources.gold, wood: state.resources.wood, stone: state.resources.stone, iron: state.resources.iron, food: state.food),
+            peopleText(state: state)
+        ]
+        if events.filter({ $0.second <= second }).isEmpty {
+            lines.append("Nema poteza do ove sekunde.")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    static func peopleText(state: GameState) -> String {
+        let seats = state.realmSeats.seats
+        if seats.isEmpty {
+            return "populacija \(state.playerPopulation)  sreća \(Int(state.playerHappiness.rounded()))%"
+        }
+        return seats.map { seat in
+            let pop = state.population(of: seat.id)
+            let happy = Int(state.happinessPercent(of: seat.id).rounded())
+            return "\(seat.displayName): populacija \(pop)  sreća \(happy)%"
+        }.joined(separator: "\n")
+    }
+
+    static func resourceLine(gold: Int, wood: Int, stone: Int, iron: Int, food: Int) -> String {
+        "zlato \(gold)  drvo \(wood)  kamen \(stone)  željezo \(iron)  hrana \(food)"
     }
 
     static func captureMaps(from state: GameState) -> (main: String, underground: String, buildings: String, army: String) {
@@ -38,107 +91,105 @@ enum TextMapCapture {
         let vRows = max(1, (rows + block - 1) / block)
         let vCols = max(1, (cols + block - 1) / block)
 
-        var main = TextGrid(rows: vRows, cols: vCols)
-        var underground = TextGrid(rows: vRows, cols: vCols)
+        let main = mainMatrix(surface)
+        let underground = under.rows == surface.rows && under.cols == surface.cols && under.rows > 0
+            ? mainMatrix(under)
+            : zeroMatrix(rows: surface.rows, cols: surface.cols)
+        let army = armyMatrix(from: state, surface: surface)
         var buildings = TextGrid(rows: vRows, cols: vCols)
-        var army = TextGrid(rows: vRows, cols: vCols)
-
-        fillMain(from: state, surface: surface, block: block, grid: &main)
-        fillUnderground(surface: surface, underground: under, block: block, grid: &underground)
         stampBuildings(surface.placements, block: block, grid: &buildings)
         stampBuildings(under.placements, block: block, grid: &buildings)
-        stampArmy(from: state, block: block, grid: &army)
 
-        return (main.encoded(), underground.encoded(), buildings.encoded(), army.encoded())
+        return (main, underground, buildings.encoded(), army)
+    }
+
+    /// Prazna matrica pune veličine. Svaka kućica je 0,0,0,0.
+    private static func zeroMatrix(rows: Int, cols: Int) -> String {
+        guard rows > 0, cols > 0 else { return "" }
+        let line = Array(repeating: "0,0,0,0", count: cols).joined(separator: " ")
+        return Array(repeating: line, count: rows).joined(separator: "\n")
+    }
+
+    /// Puna matrica, jedna ćelija = površina,visina,prohodnost,gradnja.
+    /// Prohodnost: 0 ne prolazi, 0.5 sporo, 1 normalno, 1.5 padina ili cesta, 2 padina i cesta.
+    private static func mainMatrix(_ surface: GameMap) -> String {
+        guard surface.rows > 0, surface.cols > 0 else { return "" }
+        let count = surface.rows * surface.cols
+        var road = [Bool](repeating: false, count: count)
+        var blocked = [Bool](repeating: false, count: count)
+        for placement in surface.placements where !placement.isDestroyed {
+            let isRoad = roadObject(placement.objectId)
+            let r1 = min(surface.rows, placement.row + placement.height)
+            let c1 = min(surface.cols, placement.col + placement.width)
+            var r = max(0, placement.row)
+            while r < r1 {
+                var c = max(0, placement.col)
+                while c < c1 {
+                    let index = r * surface.cols + c
+                    if isRoad { road[index] = true }
+                    if Passage.blocks(
+                        objectId: placement.objectId,
+                        row: r,
+                        col: c,
+                        originRow: placement.row,
+                        originCol: placement.col,
+                        width: placement.width,
+                        height: placement.height
+                    ) {
+                        blocked[index] = true
+                    }
+                    c += 1
+                }
+                r += 1
+            }
+        }
+        var lines: [String] = []
+        lines.reserveCapacity(surface.rows)
+        for r in 0..<surface.rows {
+            var cells: [String] = []
+            cells.reserveCapacity(surface.cols)
+            for c in 0..<surface.cols {
+                let index = r * surface.cols + c
+                cells.append(cellToken(surface, row: r, col: c, road: road[index], blocked: blocked[index]))
+            }
+            lines.append(cells.joined(separator: " "))
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func roadObject(_ objectId: String) -> Bool {
+        objectId == Road.objectId || objectId == Bridge.objectId || objectId == StoneSlab.objectId || objectId == Tunnel.objectId
+    }
+
+    private static func cellToken(_ surface: GameMap, row: Int, col: Int, road: Bool, blocked: Bool) -> String {
+        guard let cell = surface.cell(row: row, col: col) else { return "0,0,0,0" }
+        let hasRoad = road
+        let sloped = surface.surface(row: row, col: col).slope >= 1
+        let walk = walkCode(cell: cell, road: hasRoad, sloped: sloped, blocked: blocked)
+        let canBuild = !blocked && cell.buildable && cell.povrsina.isBuildable
+        return "\(surfaceCode(cell.povrsina, iron: cell.resource == .iron)),\(Int(cell.height.rounded())),\(walk),\(canBuild ? 1 : 0)"
+    }
+
+    /// 0 ne prolazi, 0.5 spor teren, 1 ravno, 1.5 padina ili cesta, 2 oboje.
+    private static func walkCode(cell: MapCell, road: Bool, sloped: Bool, blocked: Bool) -> String {
+        if blocked || !cell.walkable || cell.movementIndex <= 0 || cell.povrsina == .voda || cell.povrsina == .more {
+            return "0"
+        }
+        if sloped && road { return "2" }
+        if sloped || road { return "1.5" }
+        switch cell.povrsina {
+        case .pustinja, .kamen, .mocvara: return "0.5"
+        default: return "1"
+        }
+    }
+
+    /// Šifra terena je sam enum. Željezna naslaga na ćeliji je 2.
+    private static func surfaceCode(_ surface: PovrsinaType, iron: Bool) -> Int {
+        if iron { return PovrsinaType.zeljezo.rawValue }
+        return surface.rawValue
     }
 
     // MARK: - Slojevi
-
-    private static func fillMain(from state: GameState, surface: GameMap, block: Int, grid: inout TextGrid) {
-        for vr in 0..<grid.rows {
-            for vc in 0..<grid.cols {
-                grid[vr, vc] = sampleMain(surface: surface, block: block, visionRow: vr, visionCol: vc)
-            }
-        }
-        for (slot, start) in surface.lordStarts {
-            stampArmyChar(slot == 1 ? "@" : "a", mapRow: Double(start.row), mapCol: Double(start.col), block: block, grid: &grid)
-        }
-        for seat in state.realmSeats.seats {
-            stampArmyChar(seat.isPlayerFaction ? "@" : "a", mapRow: seat.castleRow, mapCol: seat.castleCol, block: block, grid: &grid)
-        }
-        let castles = surface.placements.filter { $0.objectId.lowercased().contains("castle") && !$0.isDestroyed }
-        stampBuildings(castles, block: block, grid: &grid, force: "@")
-    }
-
-    private static func sampleMain(surface: GameMap, block: Int, visionRow: Int, visionCol: Int) -> Character {
-        let r0 = visionRow * block
-        let c0 = visionCol * block
-        let r1 = min(surface.rows, r0 + block)
-        let c1 = min(surface.cols, c0 + block)
-        var best: Character = empty
-        var rank = 0
-        let step = block <= 8 ? 1 : max(1, block / 3)
-        var r = r0
-        while r < r1 {
-            var c = c0
-            while c < c1 {
-                if let cell = surface.cell(row: r, col: c) {
-                    let (ch, prio) = mainGlyph(cell)
-                    if prio > rank {
-                        best = ch
-                        rank = prio
-                    }
-                }
-                c += step
-            }
-            r += step
-        }
-        return best
-    }
-
-    /// Veći broj = važnije (rude i voda preko trave).
-    private static func mainGlyph(_ cell: MapCell) -> (Character, Int) {
-        if cell.resource == .iron { return ("i", 90) }
-        if cell.resource == .stone { return ("+", 85) }
-        if cell.objectIds.contains(where: { HarvestTrees.objectIds.contains($0) || $0.contains("tree") }) {
-            return ("^", 70)
-        }
-        switch cell.povrsina {
-        case .voda: return ("W", 80)
-        case .more: return ("M", 80)
-        case .put: return ("R", 55)
-        case .kamen: return ("S", 50)
-        case .mocvara: return ("B", 45)
-        case .plodna: return ("F", 30)
-        case .trava: return ("T", 25)
-        case .pustinja: return ("D", 20)
-        case .poluplodna: return ("G", 10)
-        }
-    }
-
-    private static func fillUnderground(surface: GameMap, underground: GameMap, block: Int, grid: inout TextGrid) {
-        let shafts = surface.placements.filter { Underground.entranceObjectIds.contains($0.objectId) && !$0.isDestroyed }
-        stampBuildings(shafts, block: block, grid: &grid, force: "O")
-        stampBuildings(underground.placements, block: block, grid: &grid)
-        let step = max(1, block)
-        var r = 0
-        while r < underground.rows {
-            var c = 0
-            while c < underground.cols {
-                if let cell = underground.cell(row: r, col: c) {
-                    let vr = r / block
-                    let vc = c / block
-                    if grid[vr, vc] == empty {
-                        if cell.povrsina == .voda || cell.povrsina == .more {
-                            grid[vr, vc] = "~"
-                        }
-                    }
-                }
-                c += step
-            }
-            r += step
-        }
-    }
 
     private static func stampBuildings(_ placements: [Placement], block: Int, grid: inout TextGrid, force: Character? = nil) {
         for placement in placements where !placement.isDestroyed {
@@ -158,33 +209,102 @@ enum TextMapCapture {
         }
     }
 
-    private static func stampArmy(from state: GameState, block: Int, grid: inout TextGrid) {
-        for person in state.people.people where person.healthPercent > 0 && person.activity != .leaving {
-            let ch = armyGlyph(role: person.role, isPlayer: state.playerRealmId == person.factionId || isPlayerFaction(person.factionId, state: state))
-            stampArmyChar(ch, mapRow: person.row, mapCol: person.col, block: block, grid: &grid)
+    /// Puna matrica vojske: vrsta, broj, okupirano, građevina.
+    /// Na ćeliji je najviše jedan vojnik po timu i najviše dva, i to suparnici.
+    private static func armyMatrix(from state: GameState, surface: GameMap) -> String {
+        guard surface.rows > 0, surface.cols > 0 else { return "" }
+        let cols = surface.cols
+        let count = surface.rows * cols
+        var piles: [[ArmyStamp]] = Array(repeating: [], count: count)
+        for person in state.people.people where person.role == .soldier && person.isVisible && person.activity != .leaving && person.layer == .surface {
+            let row = Int(person.row.rounded(.down))
+            let col = Int(person.col.rounded(.down))
+            guard row >= 0, col >= 0, row < surface.rows, col < cols else { continue }
+            let type = soldierCode(person.resolvedSoldierType)
+            guard type > 0 else { continue }
+            piles[row * cols + col].append(ArmyStamp(type: type, faction: person.factionId))
         }
-        for seat in state.realmSeats.seats {
-            let player = seat.isPlayerFaction
-            if seat.kingAlive {
-                stampArmyChar(player ? "K" : "k", mapRow: seat.kingRow, mapCol: seat.kingCol, block: block, grid: &grid)
+        var building = [Int](repeating: 0, count: count)
+        var owned = [Bool](repeating: false, count: count)
+        for placement in surface.placements where !placement.isDestroyed {
+            let code = buildingCode(placement.objectId)
+            let blocks = Passage.blocks(objectId: placement.objectId)
+            let r1 = min(surface.rows, placement.row + placement.height)
+            let c1 = min(cols, placement.col + placement.width)
+            var r = max(0, placement.row)
+            while r < r1 {
+                var c = max(0, placement.col)
+                while c < c1 {
+                    let index = r * cols + c
+                    if placement.ownerId != nil { owned[index] = true }
+                    if code > 0, building[index] == 0 || blocks {
+                        building[index] = code
+                    }
+                    c += 1
+                }
+                r += 1
             }
-            stampArmyChar(player ? "@" : "a", mapRow: seat.castleRow, mapCol: seat.castleCol, block: block, grid: &grid)
+        }
+        var lines: [String] = []
+        lines.reserveCapacity(surface.rows)
+        for r in 0..<surface.rows {
+            var cells: [String] = []
+            cells.reserveCapacity(cols)
+            for c in 0..<cols {
+                let index = r * cols + c
+                cells.append(armyToken(piles[index], occupied: owned[index], building: building[index]))
+            }
+            lines.append(cells.joined(separator: " "))
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private struct ArmyStamp {
+        var type: Int
+        var faction: String
+    }
+
+    /// Jedna vrsta po ćeliji. Dva vojnika samo ako su iz suprotnih timova.
+    private static func armyToken(_ stamps: [ArmyStamp], occupied: Bool, building: Int) -> String {
+        var seen = Set<String>()
+        var kept: [ArmyStamp] = []
+        for stamp in stamps where seen.insert(stamp.faction).inserted {
+            kept.append(stamp)
+            if kept.count == 2 { break }
+        }
+        let type = kept.first?.type ?? 0
+        let soldiers = kept.count
+        let held = occupied || soldiers > 0
+        return "\(type),\(soldiers),\(held ? 1 : 0),\(building)"
+    }
+
+    private static func soldierCode(_ type: SoldierType?) -> Int {
+        switch type {
+        case .archer: return 1
+        case .armoredArcher: return 2
+        case .spearman: return 3
+        case .shieldSpearman: return 4
+        case .swordsman: return 5
+        case .shieldSwordsman: return 6
+        case .heavyInfantry: return 7
+        case .mountedArcher: return 8
+        case .lancer: return 9
+        case .knight: return 10
+        case nil: return 0
         }
     }
 
-    private static func isPlayerFaction(_ factionId: String, state: GameState) -> Bool {
-        if let id = state.playerRealmId, id == factionId { return true }
-        return state.realmSeats.seats.first(where: { $0.id == factionId })?.isPlayerFaction == true
+    private static func buildingCode(_ objectId: String) -> Int {
+        buildingCodes[objectId] ?? 0
     }
 
-    private static func stampArmyChar(_ ch: Character, mapRow: Double, mapCol: Double, block: Int, grid: inout TextGrid) {
-        let vr = Int(mapRow.rounded(.down)) / block
-        let vc = Int(mapCol.rounded(.down)) / block
-        guard grid.contains(row: vr, col: vc) else { return }
-        if armyRank(ch) >= armyRank(grid[vr, vc]) {
-            grid[vr, vc] = ch
+    private static let buildingCodes: [String: Int] = {
+        var codes: [String: Int] = [:]
+        for (index, type) in PlaceableSceneKitTypes.all.enumerated() {
+            codes[type.objectId] = index + 1
         }
-    }
+        return codes
+    }()
 
     static func buildingGlyph(_ objectId: String) -> Character {
         let id = objectId.lowercased()
@@ -243,24 +363,6 @@ enum TextMapCapture {
         }
     }
 
-    private static func armyGlyph(role: PersonRole, isPlayer: Bool) -> Character {
-        switch role {
-        case .soldier: return isPlayer ? "V" : "v"
-        case .worker: return isPlayer ? "R" : "r"
-        case .peasant: return isPlayer ? "P" : "p"
-        }
-    }
-
-    private static func armyRank(_ ch: Character) -> Int {
-        switch ch {
-        case "K", "k": return 90
-        case "V", "v": return 80
-        case "@", "a": return 70
-        case "R", "r": return 40
-        case "P", "p": return 20
-        default: return 0
-        }
-    }
 }
 
 private struct TextGrid {

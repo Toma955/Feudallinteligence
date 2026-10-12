@@ -41,7 +41,7 @@ enum MapTextureCatalog {
     }()
 
     static let entries: [MapTextureEntry] = PovrsinaType.allCases.map { surface in
-        let raw = file?.teksture?[surface.rawValue]
+        let raw = file?.teksture?[surface.textureKey] ?? file?.teksture?["\(surface.rawValue)"]
         let rgb = raw?.boja
         let r = CGFloat(rgb?[safe: 0] ?? Double(fallbackColor(surface).0))
         let g = CGFloat(rgb?[safe: 1] ?? Double(fallbackColor(surface).1))
@@ -63,14 +63,13 @@ enum MapTextureCatalog {
     static func fallbackColor(_ surface: PovrsinaType) -> (CGFloat, CGFloat, CGFloat) {
         switch surface {
         case .pustinja: return (0.93, 0.80, 0.45)
-        case .poluplodna: return (0.62, 0.66, 0.32)
-        case .plodna: return (0.20, 0.62, 0.18)
-        case .trava: return (0.38, 0.58, 0.24)
-        case .voda: return (0.25, 0.60, 1.00)
-        case .more: return (0.05, 0.20, 0.65)
-        case .put: return (0.55, 0.42, 0.30)
         case .kamen: return (0.55, 0.55, 0.58)
+        case .zeljezo: return (0.45, 0.28, 0.24)
+        case .tlo: return (0.38, 0.58, 0.24)
+        case .plodna: return (0.20, 0.62, 0.18)
+        case .more: return (0.05, 0.20, 0.65)
         case .mocvara: return (0.30, 0.40, 0.25)
+        case .voda: return (0.25, 0.60, 1.00)
         }
     }
 
@@ -119,7 +118,7 @@ final class MapTextureLoader {
         if let cached = cache[surface] { return cached }
         let entry = MapTextureCatalog.entry(for: surface)
         let loaded = loadImage(named: entry.fileName, bundle: bundle)
-            ?? (surface == .trava ? TerrainTextureLoader.shared.tileImage(for: .grass, bundle: bundle) : nil)
+            ?? (surface == .tlo ? TerrainTextureLoader.shared.tileImage(for: .grass, bundle: bundle) : nil)
             ?? makeColorTile(entry.color)
         if let loaded { cache[surface] = loaded }
         return loaded
