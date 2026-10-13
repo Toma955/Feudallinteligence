@@ -2,7 +2,7 @@
 //  WineCellar.swift
 //  Feudalism
 //
-//  Vinski podrum – placeholder 5×5×3. Kategorija: hrana.
+//  Vinski podrum – 4×4 metra. Kategorija: hrana.
 //
 
 import Foundation

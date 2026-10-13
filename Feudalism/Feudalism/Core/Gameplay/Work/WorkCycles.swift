@@ -6,7 +6,7 @@
 //  Rade samo kad je radnik unutra; svaki ciklus uzme ulaz (ako ga ima) i donese proizvod.
 //  Brzina ciklusa ovisi prvenstveno o godišnjem dobu.
 //  Farme i industrija proizvode sirovine; ostali ih uzimaju i rade proizvode
-//  (kuća mača: željezo → mač, luk i koplje: drvo; farma → pšenica → mlin → brašno → pekara → kruh).
+//  (kuća mača: željezo → mač, luk i koplje: drvo; mlin: sijeno → brašno → pekara → kruh).
 //  Svaki proizvod ide u svoje skladište (StorageKind): oružje u oružarnicu (60), hrana u smočnicu (396), konji u štalu (5),
 //  sirovine i međuproizvodi u skladište (400). Sirovine se uzimaju iz skladišta; kad je puno, radnik čeka.
 //
@@ -34,7 +34,7 @@ enum Good: String, CaseIterable, Codable {
         case .gold: return "zlato"
         case .food: return "hrana"
         case .wheat: return "pšenica"
-        case .flour: return "brašno"
+        case .flour: return "vreće brašna"
         case .bread: return "kruh"
         case .corn: return "kukuruz"
         case .eggs: return "jaja"
@@ -131,7 +131,7 @@ enum WorkCycleCatalog {
         case Sheep.objectId: return WorkCycle(kind: .animal, durationTicks: 18, inputs: [:], outputs: [.wool: 2, .milk: 1])
         // Hrana
         case Food.objectId: return WorkCycle(kind: .food, durationTicks: 12, inputs: [:], outputs: [.food: 2])
-        case Windmill.objectId: return WorkCycle(kind: .food, durationTicks: 10, inputs: [.wheat: 2], outputs: [.flour: 2])
+        case Windmill.objectId: return WorkCycle(kind: .food, durationTicks: 10, inputs: [.hay: 2], outputs: [.flour: 2])
         case Bakery.objectId: return WorkCycle(kind: .food, durationTicks: 12, inputs: [.flour: 2], outputs: [.bread: 6])
         case Granary.objectId: return WorkCycle(kind: .food, durationTicks: 15, inputs: [.wheat: 3], outputs: [.food: 3])
         case Brewery.objectId: return WorkCycle(kind: .food, durationTicks: 10, inputs: [.hop: 2], outputs: [.beer: 2])
@@ -144,6 +144,7 @@ enum WorkCycleCatalog {
         case Iron.objectId: return WorkCycle(kind: .resource, durationTicks: 12, inputs: [:], outputs: [.iron: 2])
         case Stone.objectId: return WorkCycle(kind: .resource, durationTicks: 10, inputs: [:], outputs: [.stone: 3])
         case Wood.objectId: return WorkCycle(kind: .resource, durationTicks: 8, inputs: [:], outputs: [.wood: 3])
+        case Market.objectId: return WorkCycle(kind: .resource, durationTicks: 40, inputs: [:], outputs: [:])
         // Oružje
         case Sword.objectId: return WorkCycle(kind: .weapon, durationTicks: 20, inputs: [.iron: 1], outputs: [.sword: 1])
         case Shield.objectId: return WorkCycle(kind: .weapon, durationTicks: 18, inputs: [.wood: 2], outputs: [.shield: 1])

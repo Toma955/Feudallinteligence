@@ -16,13 +16,15 @@ struct MapScreenHUDBar<Content: View>: View {
     var barHeight: CGFloat
     var itemSpacing: CGFloat
     var expandsDown: Bool
+    var alertFill: Color?
     @ViewBuilder let content: () -> Content
 
-    init(onBackgroundTap: (() -> Void)? = nil, barHeight: CGFloat = 52, itemSpacing: CGFloat = 16, expandsDown: Bool = false, @ViewBuilder content: @escaping () -> Content) {
+    init(onBackgroundTap: (() -> Void)? = nil, barHeight: CGFloat = 52, itemSpacing: CGFloat = 16, expandsDown: Bool = false, alertFill: Color? = nil, @ViewBuilder content: @escaping () -> Content) {
         self.onBackgroundTap = onBackgroundTap
         self.barHeight = barHeight
         self.itemSpacing = itemSpacing
         self.expandsDown = expandsDown
+        self.alertFill = alertFill
         self.content = content
     }
 
@@ -47,7 +49,13 @@ struct MapScreenHUDBar<Content: View>: View {
         .padding(.vertical, expandsDown ? 8 : 0)
         .fixedSize(horizontal: true, vertical: expandsDown)
         .frame(minHeight: barHeight, maxHeight: expandsDown ? nil : barHeight, alignment: .top)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .background {
+            if let alertFill {
+                RoundedRectangle(cornerRadius: 10).fill(alertFill)
+            } else {
+                RoundedRectangle(cornerRadius: 10).fill(.ultraThinMaterial)
+            }
+        }
         .clipShape(RoundedRectangle(cornerRadius: 10))
 
         return Group {

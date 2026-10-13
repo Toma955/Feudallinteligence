@@ -13,6 +13,15 @@ import SwiftUI
 import AppKit
 import Combine
 
+/// Jedna narudžba koja stiže u gornji desni kut: ikona u krugu i iznos.
+struct SupplyDrop: Identifiable, Equatable {
+    let id = UUID()
+    var icon: String
+    var fallback: String
+    var amount: Int
+    var good: Good
+}
+
 /// Označeni kvadrat na karti. Jedan kut je početak, suprotni kut je kraj.
 struct GroundMark: Equatable {
     var originRow: Int
@@ -238,6 +247,18 @@ final class GameState: ObservableObject {
     @Published var foodShortfall: [String: Int] = [:]
     /// Redoslijed ulaska hrane po frakciji. Prva stavka je prva koja izlazi.
     var foodArrival: [String: [Good]] = [:]
+    /// Naručeni resursi koji još nisu stigli. Prvi u redu je sljedeći.
+    @Published var supplyQueue: [SupplyDrop] = []
+    /// Krug koji upravo ulazi s desne strane.
+    @Published var activeSupplyDrop: SupplyDrop?
+    private var supplyClock: Timer?
+    /// Roba naručena prije partije. Ulazi tek kad postoji skladište i slobodno polje. Zlato ne čeka.
+    private var pendingStartGoods: [Good: Int] = [:]
+    /// Brojač za 3D hrpe na skladištu. Raste pri svakoj kupnji/prodaji/trošenju.
+    @Published var warehouseGoodsEpoch: Int = 0
+    /// Redoslijed nastanka građevine. Manji broj = starija. Radnik ide prvo u najstariju.
+    private var buildingBirth: [String: Int] = [:]
+    private var nextBuildingBirth = 0
     /// Po frakciji: sreća 0–100 %. Nema zapisa = 100 %.
     @Published var happiness: [String: Double] = [:]
     /// Brojač prstena iznad vatre: + dolazak, − odlazak; ±1 = jedna osoba.
@@ -476,6 +497,35 @@ final class GameState: ObservableObject {
     }
     /// Poruke i upozorenja u gornjem islandu (podloga, resursi, neprijatelj, igra, multiplayer).
     @Published private(set) var hudMessages: [HUDMessage] = []
+    /// Građevina se ne može postaviti jer fali roba. Island tada pokazuje samo tu poruku.
+    @Published var buildShortage: BuildShortage?
+
+    func presentBuildShortage(objectId: String, price: Price) {
+        var lacks: [Good: Int] = [:]
+        for item in price.sortedItems {
+            let lack = item.amount - goodAmount(item.good)
+            if lack > 0 { lacks[item.good] = lack }
+        }
+        guard !lacks.isEmpty else {
+            buildShortage = nil
+            return
+        }
+        let name = ObjectCatalog.shared.object(id: objectId)?.name ?? objectId
+        buildShortage = BuildShortage(objectId: objectId, name: name, lacks: lacks)
+        placementDebugLog("FAIL insufficient resources object=\(objectId) missing=\(buildShortage?.lackText ?? "")")
+    }
+
+    /// Kupi zlatom samo resurse koji fale za trenutnu građevinu. Radi samo dok tržnica radi.
+    func buyShortageMaterials() {
+        guard marketIsWorking(), let offer = buildShortage, offer.buyCost > 0, goodAmount(.gold) >= offer.buyCost else { return }
+        addGood(.gold, -offer.buyCost)
+        for item in offer.materials { addGood(item.good, item.amount) }
+        buildShortage = nil
+    }
+
+    func clearBuildShortage() {
+        buildShortage = nil
+    }
 
     func postHUD(_ kind: HUDMessageKind, _ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -973,21 +1023,10 @@ final class GameState: ObservableObject {
         switch resourceId {
         case "gold":
             if diff > 0 { resources.add(gold: diff) } else { resources.subtract(gold: -diff) }
-        case "wood":
-            if diff > 0 { resources.add(wood: diff) } else { resources.subtract(wood: -diff) }
-        case "stone":
-            if diff > 0 { resources.add(stone: diff) } else { resources.subtract(stone: -diff) }
-        case "iron":
-            if diff > 0 { resources.add(iron: diff) } else { resources.subtract(iron: -diff) }
-        case "hop":
-            if diff > 0 { resources.add(hop: diff) } else { resources.subtract(hop: -diff) }
-            if let faction = playerSeat?.id { recordFoodArrival(.hop, diff, faction: faction) }
-        case "beer":
-            if diff > 0 { resources.add(beer: diff) } else { resources.subtract(beer: -diff) }
+        case "wood", "stone", "iron", "hop", "beer", "hay":
+            if let good = Good(rawValue: resourceId) { addGood(good, diff) }
         case "food":
-            addGood(.food, newValue - food)
-        case "hay":
-            hay = newValue
+            addGood(.food, diff)
         default:
             if let good = Good(rawValue: resourceId) { addGood(good, diff) }
         }
@@ -1063,6 +1102,7 @@ final class GameState: ObservableObject {
         clearRealmSeats()
         isShowingMainMenu = true
         isSandboxPlay = false
+        cancelOpeningSupplies()
     }
 
     /// Jednom po partiji zapiše sate i broj partija na profil.
@@ -1403,6 +1443,12 @@ final class GameState: ObservableObject {
         oxen.reset()
         matchLog = []
         foodArrival = [:]
+        cancelOpeningSupplies()
+        pendingStartGoods = [:]
+        food = 0
+        hay = 0
+        hop = 0
+        seedBuildingBirth()
         if isSoloMode {
             resources.resetForNewSoloGame()
             transformerTicksAccumulated = [:]
@@ -1463,10 +1509,11 @@ final class GameState: ObservableObject {
         }
         startNewGame()
         if isSoloMode {
-            resources.setStock(stone: max(0, initialStone), wood: max(0, initialWood), iron: max(0, initialIron), gold: max(0, initialGold))
-            food = max(0, initialFood)
-            hop = max(0, initialHop)
-            hay = max(0, initialHay)
+            resources.setStock(stone: 0, wood: 0, iron: 0, gold: max(0, initialGold))
+            queueStartGoods([
+                (.stone, initialStone), (.wood, initialWood), (.iron, initialIron),
+                (.food, initialFood), (.hop, initialHop), (.hay, initialHay)
+            ])
             grantSandboxOpening()
         }
     }
@@ -1493,10 +1540,11 @@ final class GameState: ObservableObject {
         currentLevelName = nil
         soloMapLoadedFromFile = true
         startNewGame()
-        resources.setStock(stone: max(0, initialStone), wood: max(0, initialWood), iron: max(0, initialIron), gold: max(0, initialGold))
-        food = max(0, initialFood)
-        hop = max(0, initialHop)
-        hay = max(0, initialHay)
+        resources.setStock(stone: 0, wood: 0, iron: 0, gold: max(0, initialGold))
+        queueStartGoods([
+            (.stone, initialStone), (.wood, initialWood), (.iron, initialIron),
+            (.food, initialFood), (.hop, initialHop), (.hay, initialHay)
+        ])
         grantSandboxOpening()
     }
 
@@ -1529,19 +1577,160 @@ final class GameState: ObservableObject {
             SceneKitLevelLoader.deleteSoloLevelFiles()
         }
         startNewGame()
-        resources.setStock(stone: max(0, initialStone), wood: max(0, initialWood), iron: max(0, initialIron), gold: max(0, initialGold))
-        food = max(0, initialFood)
-        hop = max(0, initialHop)
-        hay = max(0, initialHay)
-        grantSandboxOpening()
+        food = 0
+        hay = 0
+        hop = 0
     }
 
-    /// Solo graditelj dobiva 100 zlatnika i 100 jabuka. Zlato HUD broji od nule.
+    /// Naručene zalihe stižu jedna po jedna. Zlato je uvijek prvo.
+    /// Ostalo stoji u redu dok skladište nema mjesta.
+    func enqueueOpeningSupplies(_ items: [SupplyDrop]) {
+        supplyQueue.append(contentsOf: items.filter { $0.amount > 0 })
+        putGoldFirstInSupplyQueue()
+        presentNextSupplyIfNeeded()
+    }
+
+    func presentNextSupplyIfNeeded() {
+        guard isLevelReady, !isShowingMainMenu, !supplyQueue.isEmpty else {
+            supplyClock?.invalidate()
+            supplyClock = nil
+            return
+        }
+        guard supplyClock == nil else { return }
+        let timer = Timer(timeInterval: 1.15, repeats: true) { [weak self] _ in
+            self?.tryDeliverFrontSupply()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        supplyClock = timer
+    }
+
+    private func putGoldFirstInSupplyQueue() {
+        let gold = supplyQueue.filter { $0.good == .gold }
+        let rest = supplyQueue.filter { $0.good != .gold }
+        supplyQueue = gold + rest
+    }
+
+    /// Prednji u redu ide u inventar kad može. Ako ne može, cijeli red i dalje stoji.
+    private func tryDeliverFrontSupply() {
+        guard isLevelReady, !isShowingMainMenu, !supplyQueue.isEmpty else {
+            supplyClock?.invalidate()
+            supplyClock = nil
+            return
+        }
+        putGoldFirstInSupplyQueue()
+        var front = supplyQueue[0]
+        let fit: Int
+        if front.good == .gold {
+            fit = front.amount
+        } else if let faction = playerSeat?.id {
+            fit = unitsThatFit(front.good, adding: front.amount, faction: faction)
+        } else {
+            fit = 0
+        }
+        guard fit > 0 else { return }
+        addGood(front.good, fit)
+        if fit >= front.amount {
+            supplyQueue.removeFirst()
+        } else {
+            var waiting = supplyQueue[0]
+            waiting.amount = front.amount - fit
+            supplyQueue[0] = waiting
+        }
+        if supplyQueue.isEmpty {
+            supplyClock?.invalidate()
+            supplyClock = nil
+        }
+    }
+
+    func queueStartGoods(_ items: [(Good, Int)]) {
+        for (good, amount) in items where good != .gold && amount > 0 {
+            pendingStartGoods[good, default: 0] += amount
+        }
+    }
+
+    /// Upiše naručenu robu u vidljivi red. Zlato je već u kesi; ostalo čeka dok ima mjesta.
+    func applyPendingStartGoods() {
+        let waiting = pendingStartGoods.sorted { $0.key.rawValue < $1.key.rawValue }
+        pendingStartGoods = [:]
+        let drops = waiting.map { good, amount in
+            SupplyDrop(icon: supplyIconName(good), fallback: "shippingbox.fill", amount: amount, good: good)
+        }
+        enqueueOpeningSupplies(drops)
+    }
+
+    private func supplyIconName(_ good: Good) -> String {
+        switch good {
+        case .wood: return "wood_resource"
+        case .stone: return "stone_resource"
+        case .iron: return "iron_resource"
+        case .hop: return "hop_resource"
+        case .beer: return "beer_resource"
+        case .food, .wheat, .flour: return "food"
+        case .bread: return "bread_resource"
+        case .hay: return "hay_resource"
+        case .apple: return "apple_resource"
+        case .cheese: return "cheese_resource"
+        case .meat: return "meat_resouce"
+        case .sausages: return "sosages_resouce"
+        case .vegetables: return "vegetables_resource"
+        case .wine: return "vine_resources"
+        case .candle: return "candle_resource"
+        case .corn: return "corn_resource"
+        case .eggs: return "eggs_resouce"
+        case .grapes: return "grapes_resource"
+        case .flowers: return "flowers_resoiurce"
+        case .spices: return "spices_resources"
+        case .leather: return "leather_resources"
+        case .shield: return "shield_resource"
+        case .spear: return "spear_resource"
+        case .sword: return "sword_resource"
+        case .bow: return "bow_and_sparrow_resouce"
+        case .gold: return "gold"
+        default: return good.rawValue
+        }
+    }
+
+    func cancelOpeningSupplies() {
+        supplyClock?.invalidate()
+        supplyClock = nil
+        supplyQueue = []
+        activeSupplyDrop = nil
+        pendingStartGoods = [:]
+    }
+
+    /// Postojeće građevine dobivaju redoslijed kakav imaju na mapi. Nove dobivaju sljedeći broj.
+    func seedBuildingBirth() {
+        buildingBirth = [:]
+        nextBuildingBirth = 0
+        for (_, placement) in mapLogic.allPlacements {
+            noteBuildingBorn(placement.id)
+        }
+    }
+
+    func ensureBuildingBirth(for ids: [String]) {
+        for id in ids where buildingBirth[id] == nil {
+            noteBuildingBorn(id)
+        }
+    }
+
+    func noteBuildingBorn(_ id: String) {
+        guard buildingBirth[id] == nil else { return }
+        buildingBirth[id] = nextBuildingBirth
+        nextBuildingBirth += 1
+    }
+
+    func buildingBirthRank(_ id: String) -> Int {
+        if let known = buildingBirth[id] { return known }
+        noteBuildingBorn(id)
+        return buildingBirth[id] ?? 0
+    }
+
+    /// Solo graditelj dobiva do 100 zlatnika. Jabuke stižu samo ako imaju polje u skladištu.
     private func grantSandboxOpening() {
         guard isSandboxPlay else { return }
         let missingGold = max(0, 100 - resources.gold)
         if missingGold > 0 { resources.add(gold: missingGold) }
-        addGood(.apple, 100)
+        queueStartGoods([(.apple, 100)])
     }
 
     /// Spremi trenutnu mapu (teren, visine, građevine) u odabranu datoteku.
@@ -1645,6 +1834,7 @@ extension GameState {
     func placeSelectedObjectAt(row: Int, col: Int, playSound: Bool = true) -> Bool {
         guard !isGamePaused else { return false }
         placementError = nil
+        buildShortage = nil
         placementDebugLog("GameState.placeSelectedObjectAt row=\(row) col=\(col) selected=\(selectedPlacementObjectId ?? "nil")")
         guard let objectId = selectedPlacementObjectId else {
             let msg = "Nije odabran objekt za postavljanje. Prvo odaberi Zid (Dvor → Zid)."
@@ -1657,9 +1847,8 @@ extension GameState {
             return false
         }
         let price = PriceList.price(for: objectId)
-        if !isMapEditorMode, let lack = missing(for: price) {
-            placementError = "Nedovoljno: nedostaje \(lack). Cijena: \(price.description)."
-            placementDebugLog("FAIL insufficient resources object=\(objectId) price=\(price.description) missing=\(lack)")
+        if !isMapEditorMode, !canAfford(price) {
+            presentBuildShortage(objectId: objectId, price: price)
             return false
         }
         let obj = ObjectCatalog.shared.object(id: objectId)
@@ -1682,6 +1871,7 @@ extension GameState {
             pay(price)
             if objectId == Carriage.objectId { ensureTransportLine(for: placed) }
         }
+        noteBuildingBorn(placed.id)
         placementsVersion += 1
         objectWillChange.send()
         if playSound && playPlacementSound {

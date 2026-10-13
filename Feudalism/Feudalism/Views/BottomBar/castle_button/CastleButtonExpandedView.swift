@@ -2,7 +2,7 @@
 //  CastleButtonExpandedView.swift
 //  Feudalism
 //
-//  Prošireni sadržaj za kategoriju Dvor: Zid, Tržnica, Stepenice, Dvorac, … Trening i Oružarnica su u Oružju.
+//  Prošireni sadržaj za kategoriju Dvor: Zid, Stepenice, Dvorac, … Tržnica je u industriji. Trening i Oružarnica su u Oružju.
 //
 
 import SwiftUI
@@ -11,7 +11,6 @@ struct CastleButtonExpandedView: View {
     @EnvironmentObject private var gameState: GameState
     var onSelectWall: () -> Void
     var onSelectSmallWall: () -> Void
-    var onSelectMarket: () -> Void
     var onSelectCastle: () -> Void
     var onSelectSteps: () -> Void
     var onSelectStairs: () -> Void
@@ -25,7 +24,6 @@ struct CastleButtonExpandedView: View {
         CategoryExpandedView(items: [
             CategoryExpandedItem(assetName: "wall", systemName: "rectangle.3.group", labelKey: "huge_wall", action: onSelectWall),
             CategoryExpandedItem(assetName: "wall", systemName: "rectangle.3.group", labelKey: "wall_small", action: onSelectSmallWall),
-            CategoryExpandedItem(assetName: "market", systemName: "cart.fill", labelKey: "market", action: onSelectMarket),
             CategoryExpandedItem(assetName: "steps", systemName: "square.stack.3d.up.fill", labelKey: "castle_steps", action: onSelectSteps),
             CategoryExpandedItem(assetName: "stairs", systemName: "stairs", labelKey: "castle_stairs", action: onSelectStairs),
             CategoryExpandedItem(assetName: "castle", systemName: "building.castle.fill", labelKey: "castle_castle", action: onSelectCastle),

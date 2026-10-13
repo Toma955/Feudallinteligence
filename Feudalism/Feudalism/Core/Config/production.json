@@ -17,7 +17,7 @@
     "object_candle_shop": { "naziv": "Svijećarnica",    "vrsta": "food",     "potezi": 10, "ulaz": { "wax": 1 },             "izlaz": { "candle": 2 } },
     "object_stable":      { "naziv": "Štala (konji)",   "vrsta": "animal",   "potezi": 40, "ulaz": {},                       "izlaz": { "horse": 1 } },
     "object_food":        { "naziv": "Hrana",           "vrsta": "food",     "potezi": 12, "ulaz": {},                       "izlaz": { "food": 2 } },
-    "object_windmill":    { "naziv": "Mlin",            "vrsta": "food",     "potezi": 10, "ulaz": { "wheat": 2 },           "izlaz": { "flour": 2 } },
+    "object_windmill":    { "naziv": "Mlin",            "vrsta": "food",     "potezi": 10, "ulaz": { "hay": 2 },             "izlaz": { "flour": 2 } },
     "object_bakery":      { "naziv": "Pekara",          "vrsta": "food",     "potezi": 12, "ulaz": { "flour": 2 },           "izlaz": { "bread": 6 } },
     "object_granary":     { "naziv": "Žitnica",         "vrsta": "food",     "potezi": 15, "ulaz": { "wheat": 3 },           "izlaz": { "food": 3 } },
     "object_brewery":     { "naziv": "Pivovara",        "vrsta": "food",     "potezi": 10, "ulaz": { "hop": 2 },             "izlaz": { "beer": 2 } },

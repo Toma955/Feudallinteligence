@@ -10,7 +10,14 @@ import Foundation
 
 enum BuildingAlert: String, Codable {
     case noWorker
+    case noMoney
+    case noResources
     case noPath
+    case noRoomWarehouse
+    case noRoomPantry
+    case noRoomArmory
+    case noRoomOther
+    case onFire
     case sleeping
     case castleClosed
     case noCandle
@@ -19,11 +26,28 @@ enum BuildingAlert: String, Codable {
     var text: String {
         switch self {
         case .noWorker: return "Nema radnika"
-        case .noPath: return "Nema puta"
+        case .noMoney: return "Nema novaca"
+        case .noResources: return "Nema resursa"
+        case .noPath: return "Nema puta/prolaza"
+        case .noRoomWarehouse: return "Nema mjesta u skladištu"
+        case .noRoomPantry: return "Nema mjesta u smočnici"
+        case .noRoomArmory: return "Nema mjesta u oružarnici"
+        case .noRoomOther: return "Nema mjesta u skladištu"
+        case .onFire: return "Pod vatrom"
         case .sleeping: return "Spava"
         case .castleClosed: return "Dvorac zatvoren"
         case .noCandle: return "Nema svijeće"
         case .noTree: return "Nema stabla"
+        }
+    }
+
+    /// Problemi koje vlasnik vidi na donjem islandu.
+    var showsOnBuilding: Bool {
+        switch self {
+        case .noWorker, .noMoney, .noResources, .noPath, .noRoomWarehouse, .noRoomPantry, .noRoomArmory, .noRoomOther, .onFire, .noCandle:
+            return true
+        case .sleeping, .castleClosed, .noTree:
+            return false
         }
     }
 }
@@ -59,23 +83,58 @@ final class BuildingAlertsRuntime {
 }
 
 extension GameState {
-    /// Što ne valja s radnim mjestom igrača; nil = radi ili radnik dolazi.
-    func buildingAlert(for placement: Placement, layer: MapLayer) -> BuildingAlert? {
-        let workplace = WorkCycleCatalog.isWorkplace(placement.objectId)
-        let storage = StorageKind.of(buildingId: placement.objectId) != nil
-        guard workplace || storage, !placement.isDestroyed else { return nil }
-        let state = buildingStates[placement.id] ?? BuildingState()
-        if state.isClosed { return .sleeping }
-        guard workplace else { return nil }
-        if state.isOnFire { return nil }
-        if state.waitingForCandle { return .noCandle }
-        if state.waitingForTree { return .noTree }
-        if let faction = owner(of: placement), CandleRules.needsCandle(objectId: placement.objectId, layer: layer),
-           !CandleRules.hasCandles(self, faction) {
-            return .noCandle
+    /// Svi razlozi zbog kojih radno mjesto trenutno ne može raditi.
+    func workplaceProblems(for placement: Placement, layer: MapLayer) -> [BuildingAlert] {
+        guard WorkCycleCatalog.isWorkplace(placement.objectId), !placement.isDestroyed else {
+            let state = buildingStates[placement.id] ?? BuildingState()
+            return state.isOnFire ? [.onFire] : []
         }
-        if !hasPath(to: placement, layer: layer) { return .noPath }
-        return state.worker == .none ? .noWorker : nil
+        let state = buildingStates[placement.id] ?? BuildingState()
+        if state.isClosed { return [.sleeping] }
+        var problems: [BuildingAlert] = []
+        if state.isOnFire { problems.append(.onFire) }
+        let faction = owner(of: placement)
+        let dark = CandleRules.needsCandle(objectId: placement.objectId, layer: layer)
+            && faction.map { !CandleRules.hasCandles(self, $0) } == true
+        if dark { problems.append(.noCandle) }
+        if !hasPath(to: placement, layer: layer), !dark { problems.append(.noPath) }
+        if state.worker == .none, !state.isOnFire { problems.append(.noWorker) }
+        guard let cycle = WorkCycleCatalog.cycle(for: placement.objectId), let faction else {
+            return problems
+        }
+        let goldNeed = cycle.inputs[.gold] ?? 0
+        if goldNeed > 0, goodAmount(.gold, of: faction) < goldNeed { problems.append(.noMoney) }
+        let shortResource = cycle.inputs.contains { good, amount in
+            good != .gold && goodAmount(good, of: faction) < amount
+        }
+        if shortResource || (state.waitingForInput && goldNeed == 0) { problems.append(.noResources) }
+        if state.waitingForStorage || storageBlocks(cycle, faction: faction) {
+            let kind = missingStorage(for: cycle.outputs, of: faction) ?? fullStorage(for: cycle.outputs, of: faction)
+            problems.append(roomAlert(kind))
+        }
+        if state.waitingForTree { problems.append(.noTree) }
+        return problems
+    }
+
+    private func storageBlocks(_ cycle: WorkCycle, faction: String) -> Bool {
+        guard cycle.outputs.contains(where: { StorageKind.of($0.key) != nil }) else { return false }
+        return missingStorage(for: cycle.outputs, of: faction) != nil
+            || fullStorage(for: cycle.outputs, of: faction) != nil
+    }
+
+    private func roomAlert(_ kind: StorageKind?) -> BuildingAlert {
+        switch kind {
+        case .warehouse: return .noRoomWarehouse
+        case .pantry: return .noRoomPantry
+        case .armory: return .noRoomArmory
+        default: return .noRoomOther
+        }
+    }
+
+    /// Najvažniji razlog, za pločicu iznad građevine. Nil = radi ili radnik dolazi.
+    func buildingAlert(for placement: Placement, layer: MapLayer) -> BuildingAlert? {
+        let problems = workplaceProblems(for: placement, layer: layer)
+        return problems.first
     }
 
     /// Oznake nadzemnih radnih mjesta igrača za 3D prikaz.

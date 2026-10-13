@@ -2679,6 +2679,16 @@ struct SceneKitMapView: NSViewRepresentable {
             refreshPlacements(node, placements: placements, templates: coord.placementTemplates, mapRows: rows, mapCols: cols)
             coord.lastPlacementsCount = placements.count
             coord.lastPlacementsVersion = gameState.placementsVersion
+            coord.warehouseStockKey = ""
+            coord.lastWarehouseEpoch = -1
+        }
+        if let stores = coord.placementsNode {
+            let key = WarehouseStacks.stockKey(gameState)
+            if key != coord.warehouseStockKey || gameState.warehouseGoodsEpoch != coord.lastWarehouseEpoch {
+                coord.warehouseStockKey = key
+                coord.lastWarehouseEpoch = gameState.warehouseGoodsEpoch
+                WarehouseStacks.refresh(in: stores, gameState: gameState)
+            }
         }
         let zoom = gameState.mapCameraSettings.currentZoom
         let div40 = gridDivisionsBuilding(rows: rows, cols: cols)
@@ -3799,6 +3809,7 @@ struct SceneKitMapView: NSViewRepresentable {
         var lastPlacementsVersion: Int = -1
         var pantryStockKey = ""
         var warehouseStockKey = ""
+        var lastWarehouseEpoch = -1
 
         func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
             guard !retired, gameState?.isShowingMainMenu != true else { return }
@@ -3831,16 +3842,11 @@ struct SceneKitMapView: NSViewRepresentable {
                 h + animatedDepth,
                 pan.y + cos(r) * orbitRadius
             )
-            if let gs = gameState, let stores = surfacePlacementsNode {
+            if let gs = gameState, let stores = placementsNode {
                 let key = AppleBasketShapes.stockKey(gs)
                 if key != pantryStockKey {
                     pantryStockKey = key
                     AppleBasketShapes.refreshPantries(in: stores, gameState: gs)
-                }
-                let warehouseKey = WarehouseStacks.stockKey(gs)
-                if warehouseKey != warehouseStockKey {
-                    warehouseStockKey = warehouseKey
-                    WarehouseStacks.refresh(in: stores, gameState: gs)
                 }
             }
             if let gs = gameState, let seats = seatsNode {

@@ -65,7 +65,7 @@ enum ObjectDimensions {
     /// Destilerija: 4×4×5.
     static let distillery = ObjectDimension(cellWidth: 4, cellHeight: 4, heightCells: 5)
     /// Vinski podrum: 5×5×3.
-    static let wineCellar = ObjectDimension(cellWidth: 5, cellHeight: 5, heightCells: 3)
+    static let wineCellar = ObjectDimension(cellWidth: 4, cellHeight: 4, heightCells: 3)
     /// Krčma: 5×4×4.
     static let tavern = ObjectDimension(cellWidth: 5, cellHeight: 4, heightCells: 4)
     /// Smočnica: 4×4×4.
@@ -116,12 +116,13 @@ enum ObjectDimensions {
     /// Diplomacija: 5×5×6.
     static let diplomacy = ObjectDimension(cellWidth: 5, cellHeight: 5, heightCells: 6)
 
-    // MARK: - Oružje (mač, štit, luk, koplje, koža, trening, oružarnica) – svi 5×5
-    static let sword = ObjectDimension(cellWidth: 5, cellHeight: 5, heightCells: 4)
-    static let shield = ObjectDimension(cellWidth: 5, cellHeight: 5, heightCells: 4)
-    static let bow = ObjectDimension(cellWidth: 5, cellHeight: 5, heightCells: 4)
-    static let spear = ObjectDimension(cellWidth: 5, cellHeight: 5, heightCells: 4)
-    static let leather = ObjectDimension(cellWidth: 5, cellHeight: 5, heightCells: 4)
+    // MARK: - Oružje
+    /// Mač, štit, luk, koplje i koža: 4×4 metra. Trening i oružarnica ostaju 5×5.
+    static let sword = ObjectDimension(cellWidth: 4, cellHeight: 4, heightCells: 4)
+    static let shield = ObjectDimension(cellWidth: 4, cellHeight: 4, heightCells: 4)
+    static let bow = ObjectDimension(cellWidth: 4, cellHeight: 4, heightCells: 4)
+    static let spear = ObjectDimension(cellWidth: 4, cellHeight: 4, heightCells: 4)
+    static let leather = ObjectDimension(cellWidth: 4, cellHeight: 4, heightCells: 4)
     static let training = ObjectDimension(cellWidth: 5, cellHeight: 5, heightCells: 4)
     static let armory = ObjectDimension(cellWidth: 5, cellHeight: 5, heightCells: 4)
 

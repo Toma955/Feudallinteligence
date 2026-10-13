@@ -252,7 +252,13 @@ extension GameState {
 
     /// Skladište koje nema mjesta za ishod ciklusa; nil = ima mjesta svugdje.
     func fullStorage(for outputs: [Good: Int], of faction: String) -> StorageKind? {
-        Self.storageNeeds(outputs).first { storageCapacity($0.key, of: faction) - storageStored($0.key, of: faction) < $0.value }?.key
+        if let kind = Self.storageNeeds(outputs).first(where: { storageCapacity($0.key, of: faction) - storageStored($0.key, of: faction) < $0.value })?.key {
+            return kind
+        }
+        for (good, amount) in outputs where amount > 0 && good != .gold && unitsThatFit(good, adding: 1, faction: faction) == 0 {
+            return StorageKind.of(good) ?? .warehouse
+        }
+        return nil
     }
 
     // MARK: - Zalihe robe
@@ -273,20 +279,31 @@ extension GameState {
 
     func addGood(_ good: Good, _ amount: Int, tracksArrival: Bool = true) {
         guard amount != 0 else { return }
+        let accepted: Int = {
+            guard amount > 0, good != .gold, let faction = playerSeat?.id else { return amount }
+            return unitsThatFit(good, adding: amount, faction: faction)
+        }()
+        guard accepted != 0 else { return }
         let before = tracksArrival && FoodRules.isStockFood(good) ? goodAmount(good) : 0
         switch good {
-        case .stone: amount > 0 ? resources.add(stone: amount) : resources.subtract(stone: -amount)
-        case .wood: amount > 0 ? resources.add(wood: amount) : resources.subtract(wood: -amount)
-        case .iron: amount > 0 ? resources.add(iron: amount) : resources.subtract(iron: -amount)
-        case .hop: amount > 0 ? resources.add(hop: amount) : resources.subtract(hop: -amount)
-        case .beer: amount > 0 ? resources.add(beer: amount) : resources.subtract(beer: -amount)
-        case .gold: amount > 0 ? resources.add(gold: amount) : resources.subtract(gold: -amount)
-        case .food: food = max(0, food + amount)
-        case .hay: hay = max(0, hay + amount)
-        default: goods[good] = max(0, (goods[good] ?? 0) + amount)
+        case .stone: accepted > 0 ? resources.add(stone: accepted) : resources.subtract(stone: -accepted)
+        case .wood: accepted > 0 ? resources.add(wood: accepted) : resources.subtract(wood: -accepted)
+        case .iron: accepted > 0 ? resources.add(iron: accepted) : resources.subtract(iron: -accepted)
+        case .hop: accepted > 0 ? resources.add(hop: accepted) : resources.subtract(hop: -accepted)
+        case .beer: accepted > 0 ? resources.add(beer: accepted) : resources.subtract(beer: -accepted)
+        case .gold: accepted > 0 ? resources.add(gold: accepted) : resources.subtract(gold: -accepted)
+        case .food: food = max(0, food + accepted)
+        case .hay: hay = max(0, hay + accepted)
+        default: goods[good] = max(0, (goods[good] ?? 0) + accepted)
         }
         if tracksArrival, FoodRules.isStockFood(good), let faction = playerSeat?.id {
             recordFoodArrival(good, goodAmount(good) - before, faction: faction)
+        }
+        if good != .gold, let faction = playerSeat?.id {
+            warehouseGoodsEpoch &+= 1
+            DispatchQueue.main.async { [weak self] in
+                self?.syncLagerBays(of: faction)
+            }
         }
     }
 
@@ -382,7 +399,9 @@ extension GameState {
             return fresh
         }
 
-        for (layer, p) in all {
+        ensureBuildingBirth(for: all.map(\.placement.id))
+        let byAge = all.sorted { buildingBirthRank($0.placement.id) < buildingBirthRank($1.placement.id) }
+        for (layer, p) in byAge {
             guard let cycle = WorkCycleCatalog.cycle(for: p.objectId) else { continue }
             var state = states[p.id] ?? BuildingState()
             guard !state.isOnFire, !p.isDestroyed, let faction = owner(of: p) else { continue }

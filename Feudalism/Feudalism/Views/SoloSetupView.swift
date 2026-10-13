@@ -342,29 +342,46 @@ struct SoloSetupView: View {
             initialHop: initialHop,
             initialHay: initialHay
         )
-        applyExtraStartingGoods()
+        gameState.enqueueOpeningSupplies(openingDrops())
         isPresented = false
     }
 
-    private func applyExtraStartingGoods() {
-        gameState.addGood(.beer, initialBeer)
-        gameState.addGood(.corn, initialCorn)
-        gameState.addGood(.eggs, initialEggs)
-        gameState.addGood(.grapes, initialGrapes)
-        gameState.addGood(.meat, initialMeat)
-        gameState.addGood(.cheese, initialCheese)
-        gameState.addGood(.apple, initialApple)
-        gameState.addGood(.candle, initialCandle)
-        gameState.addGood(.flowers, initialFlowers)
-        gameState.addGood(.leather, initialLeather)
-        gameState.addGood(.shield, initialShield)
-        gameState.addGood(.sausages, initialSausages)
-        gameState.addGood(.spear, initialSpear)
-        gameState.addGood(.spices, initialSpices)
-        gameState.addGood(.sword, initialSword)
-        gameState.addGood(.vegetables, initialVegetables)
-        gameState.addGood(.wine, initialVine)
-        gameState.addGood(.bow, initialBowAndSparrow)
+    /// Redoslijed je isti kao na narudžbi. Nula se preskače. Zlatnici do 100 i 100 jabuka stižu na kraju.
+    private func openingDrops() -> [SupplyDrop] {
+        var drops: [SupplyDrop] = []
+        func add(_ icon: String, _ fallback: String, _ amount: Int, _ good: Good) {
+            let count = max(0, amount)
+            guard count > 0 else { return }
+            drops.append(SupplyDrop(icon: icon, fallback: fallback, amount: count, good: good))
+        }
+        add("gold", "dollarsign.circle.fill", initialGold, .gold)
+        add("wood_resource", "leaf.fill", initialWood, .wood)
+        add("iron_resource", "cylinder.fill", initialIron, .iron)
+        add("stone_resource", "mountain.2.fill", initialStone, .stone)
+        add("bread_resource", "fork.knife", initialFood, .food)
+        add("hop_resource", "mug.fill", initialHop, .hop)
+        add("hay_resource", "circle.hexagongrid.fill", initialHay, .hay)
+        add("eggs_resouce", "oval.fill", initialEggs, .eggs)
+        add("corn_resource", "leaf.fill", initialCorn, .corn)
+        add("grapes_resource", "leaf.circle.fill", initialGrapes, .grapes)
+        add("meat_resouce", "fork.knife", initialMeat, .meat)
+        add("cheese_resource", "square.fill", initialCheese, .cheese)
+        add("beer_resource", "mug.fill", initialBeer, .beer)
+        add("apple_resource", "apple.logo", initialApple, .apple)
+        add("vegetables_resource", "carrot.fill", initialVegetables, .vegetables)
+        add("spices_resources", "leaf.fill", initialSpices, .spices)
+        add("candle_resource", "flame.fill", initialCandle, .candle)
+        add("vine_resources", "drop.fill", initialVine, .wine)
+        add("sosages_resouce", "fork.knife", initialSausages, .sausages)
+        add("leather_resources", "square.fill", initialLeather, .leather)
+        add("flowers_resoiurce", "camera.macro", initialFlowers, .flowers)
+        add("shield_resource", "shield.fill", initialShield, .shield)
+        add("spear_resource", "line.diagonal", initialSpear, .spear)
+        add("sword_resource", "line.diagonal", initialSword, .sword)
+        add("bow_and_sparrow_resouce", "arrow.up", initialBowAndSparrow, .bow)
+        add("gold", "dollarsign.circle.fill", max(0, 100 - max(0, initialGold)), .gold)
+        add("apple_resource", "apple.logo", 100, .apple)
+        return drops
     }
 
     private static let resourceGridColumns = 6

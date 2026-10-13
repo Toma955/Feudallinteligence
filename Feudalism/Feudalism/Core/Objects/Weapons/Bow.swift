@@ -2,7 +2,7 @@
 //  Bow.swift
 //  Feudalism
 //
-//  Luk – placeholder 5×5. Kategorija: vojska.
+//  Luk – radionica 4×4 metra. Kategorija: vojska.
 //
 
 import Foundation
@@ -19,7 +19,7 @@ enum Bow: PlaceableSceneKitObject {
     }
 
     static func loadSceneKitNode(from bundle: Bundle = .main) -> SCNNode? {
-        WeaponYard.makeNode(name: "bow", craft: .bow)
+        WeaponYard.makeNode(name: "bow", craft: .bow, cells: ObjectDimensions.bow.cellWidth)
     }
 
     static func reapplyTexture(to node: SCNNode, bundle: Bundle = .main) -> Bool { true }

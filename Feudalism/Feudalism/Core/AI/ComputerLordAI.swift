@@ -105,7 +105,8 @@ extension GameState {
                     guard row >= 1, col >= 1, row + height < gameMap.rows, col + width < gameMap.cols else { continue }
                     guard mapLogic.isFree(.surface, row: row, col: col, width: width, height: height) else { continue }
                     if buildRuleViolation(objectId: objectId, row: row, col: col, width: width, height: height) != nil { continue }
-                    guard gameMap.place(objectId: objectId, width: width, height: height, atRow: row, col: col, ownerId: owner) != nil else { continue }
+                    guard let placed = gameMap.place(objectId: objectId, width: width, height: height, atRow: row, col: col, ownerId: owner) else { continue }
+                    noteBuildingBorn(placed.id)
                     notePlacementsChanged()
                     return (row, col)
                 }

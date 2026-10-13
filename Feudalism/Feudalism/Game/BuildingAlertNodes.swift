@@ -64,8 +64,10 @@ private func makeAlertBadge(_ alert: BuildingAlert) -> SCNNode {
     }
     let color: NSColor
     switch alert {
-    case .noWorker: color = NSColor(red: 0.85, green: 0.5, blue: 0.1, alpha: 0.92)
-    case .noPath: color = NSColor(red: 0.78, green: 0.16, blue: 0.14, alpha: 0.92)
+    case .noWorker, .noResources, .noRoomWarehouse, .noRoomPantry, .noRoomArmory, .noRoomOther:
+        color = NSColor(red: 0.85, green: 0.5, blue: 0.1, alpha: 0.92)
+    case .noMoney: color = NSColor(red: 0.72, green: 0.58, blue: 0.12, alpha: 0.94)
+    case .noPath, .onFire: color = NSColor(red: 0.78, green: 0.16, blue: 0.14, alpha: 0.92)
     case .sleeping: color = NSColor(red: 0.25, green: 0.33, blue: 0.55, alpha: 0.92)
     case .castleClosed: color = NSColor(red: 0.2, green: 0.45, blue: 0.3, alpha: 0.95)
     case .noCandle: color = NSColor(red: 0.92, green: 0.72, blue: 0.22, alpha: 0.94)

@@ -424,6 +424,7 @@ struct ContentView: View {
     @State private var happyToken = 0
     @State private var hudMainWidth: CGFloat = 0
     @State private var foodNaturalWidth: CGFloat = 1
+    @State private var marketResourceFocused = false
 
     var body: some View {
         MapScreenLayout(
@@ -457,6 +458,19 @@ struct ContentView: View {
                         CampaignResultOverlay(result: result)
                     }
 
+                    if !gameState.isMapEditorMode, !gameState.supplyQueue.isEmpty {
+                        VStack {
+                            HStack {
+                                Spacer()
+                                SupplyQueueLine(queue: gameState.supplyQueue)
+                            }
+                            Spacer()
+                        }
+                        .padding(.top, 16)
+                        .padding(.trailing, 20)
+                        .allowsHitTesting(false)
+                    }
+
                     if let notice = gameState.factionDefeatNotice {
                         VStack {
                             Text(notice)
@@ -473,7 +487,15 @@ struct ContentView: View {
                     }
 
                     VStack(spacing: 0) {
-                        Spacer()
+                        if gameState.inspectedBuildingTitle != nil {
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    gameState.inspectedBuildingTitle = nil
+                                }
+                        } else {
+                            Spacer()
+                        }
                         HStack(spacing: 0) {
                             bottomBarSideSlot(showsMap: true)
                             VStack(spacing: 0) {
@@ -482,7 +504,7 @@ struct ContentView: View {
                                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                                         .transition(.opacity)
                                 } else if let placementId = gameState.inspectedPlacementId, let title = gameState.inspectedBuildingTitle {
-                                    BuildingStatusView(placementId: placementId, title: title)
+                                    BuildingStatusView(placementId: placementId, title: title, marketFocused: $marketResourceFocused)
                                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 } else if let title = gameState.inspectedBuildingTitle {
                                     Text(title)
@@ -621,6 +643,9 @@ struct ContentView: View {
         .onChange(of: gameState.inspectedBuildingTitle) { title in
             if title != nil { expandedBottomCategory = nil }
         }
+        .onChange(of: gameState.inspectedPlacementId) { _ in
+            marketResourceFocused = false
+        }
         .onChange(of: gameState.isGamePaused) { paused in
             if paused {
                 pausedAt = Date()
@@ -635,6 +660,7 @@ struct ContentView: View {
                 gameState.focusSoloCameraOnCenter()
                 gameState.spawnRealmSeatsIfNeeded(animated: true)
                 gameState.beginMatchClock()
+                gameState.presentNextSupplyIfNeeded()
                 AudioManager.shared.playMapMusicIfAvailable(volume: gameState.effectiveMusicVolume)
             } else {
                 gameStartTime = nil
@@ -748,9 +774,32 @@ struct ContentView: View {
     private var bottomBarPanelHeight: CGFloat {
         let base: CGFloat
         if bottomBarCategoryOpen { base = 196 }
+        else if stockGridOpen { base = marketResourceFocused ? 320 : marketGridFitHeight }
         else if !bottomBarShowsPeople, gameState.inspectedPlacementId != nil { base = 196 }
         else { base = 104 }
+        if stockGridOpen { return max(base, base * bottomBarArea) }
         return base * bottomBarArea
+    }
+
+    /// Visina u koju stanu svi resursi tržnice, bez skrolanja.
+    private var marketGridFitHeight: CGFloat {
+        let count = 1 + Good.allCases.filter { $0 != .gold && $0 != .horse }.count
+        let rows = Int(ceil(Double(count) / 8))
+        let rowHeight: CGFloat = 86
+        let gaps = CGFloat(max(0, rows - 1)) * 16
+        return 78 + CGFloat(rows) * rowHeight + gaps
+    }
+
+    /// Tržnica s radnikom ili skladište otvara cijeli popis resursa.
+    private var stockGridOpen: Bool {
+        guard let id = gameState.inspectedPlacementId,
+              let (_, placement) = gameState.locatePlacement(id: id),
+              gameState.isOwnedByPlayer(placement) else { return false }
+        if placement.objectId == Lager.objectId { return true }
+        if placement.objectId == Market.objectId {
+            return gameState.buildingStates[id]?.hasWorkerInside == true
+        }
+        return false
     }
 
     private var bottomBarCategoryOpen: Bool {
@@ -1498,12 +1547,28 @@ private extension ContentView {
     private var gameHUD: some View {
         VStack(spacing: 8) {
             hudIsland
-            HUDMessageStrip()
         }
     }
 
+    private var islandAlertFill: Color? {
+        if gameState.buildShortage != nil { return Color.red.opacity(0.42) }
+        if gameState.hudMessages.first != nil { return Color.red.opacity(0.36) }
+        return nil
+    }
+
     private var hudIsland: some View {
-        MapScreenHUDBar(onBackgroundTap: toggleHUDIsland, barHeight: 64, itemSpacing: 8, expandsDown: showFoodRow) {
+        MapScreenHUDBar(
+            onBackgroundTap: islandAlertFill == nil ? toggleHUDIsland : nil,
+            barHeight: 64,
+            itemSpacing: 8,
+            expandsDown: showFoodRow && islandAlertFill == nil,
+            alertFill: islandAlertFill
+        ) {
+            if let offer = gameState.buildShortage {
+                buildShortageBanner(offer)
+            } else if let msg = gameState.hudMessages.first {
+                islandMessage(msg)
+            } else {
             VStack(alignment: .leading, spacing: showFoodRow ? 8 : 0) {
             HStack(alignment: .center, spacing: 8) {
             if hudMouseNear {
@@ -1644,6 +1709,7 @@ private extension ContentView {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
             }
+            }
         }
         .padding(.bottom, 8)
         .animation(.easeInOut(duration: 0.32), value: showFoodRow)
@@ -1688,6 +1754,79 @@ private extension ContentView {
         }
         .buttonStyle(.plain)
         .help(help)
+    }
+
+    private func buildShortageBanner(_ offer: BuildShortage) -> some View {
+        let marketOpen = gameState.marketIsWorking()
+        let canBuy = marketOpen && offer.buyCost > 0 && gameState.goodAmount(.gold) >= offer.buyCost
+        return HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Ne možeš izgraditi \(offer.name).")
+                    .font(.system(size: 15, weight: .semibold))
+                Text("Upozorenje: nedostaje \(offer.lackText).")
+                    .font(.system(size: 13, weight: .medium))
+                if offer.buyCost > 0, !marketOpen {
+                    Text("Tržnica mora biti sagrađena i raditi.")
+                        .font(.system(size: 13, weight: .medium))
+                }
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if marketOpen, offer.buyCost > 0 {
+                Button {
+                    gameState.buyShortageMaterials()
+                } label: {
+                    Text(canBuy ? "Kupi za \(offer.buyCost) zlata" : "Treba \(offer.buyCost) zlata")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(Color.white.opacity(canBuy ? 0.22 : 0.1), in: Capsule())
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.75), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canBuy)
+            }
+            Button {
+                gameState.clearBuildShortage()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(minWidth: 560, minHeight: 64)
+    }
+
+    private func islandMessage(_ msg: HUDMessage) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: msg.kind.icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+            Text(msg.text)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+            Spacer(minLength: 8)
+            Button {
+                gameState.dismissHUD(msg.id)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(minWidth: 480, minHeight: 64)
+        .task(id: msg.id) {
+            try? await Task.sleep(nanoseconds: 5_500_000_000)
+            gameState.dismissHUD(msg.id)
+        }
     }
 
     private var resourceStrip: some View {
@@ -2083,6 +2222,61 @@ private struct MinimapMiniature: View {
             context.fill(Path(mark), with: .color(Color(red: 0.18, green: 0.53, blue: 0.67)))
         }
         .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+/// Red dolazaka u gornjem desnom kutu. Prvi, zlato, stoji sprijeda. Ostali čekaju iza njega.
+private struct SupplyQueueLine: View {
+    var queue: [SupplyDrop]
+    @State private var slide: CGFloat = 240
+
+    var body: some View {
+        HStack(spacing: -34) {
+            ForEach(Array(queue.enumerated()).reversed(), id: \.element.id) { index, drop in
+                SupplyArrivalChip(drop: drop)
+                    .scaleEffect(index == 0 ? 1 : 0.84)
+                    .zIndex(Double(queue.count - index))
+            }
+        }
+        .offset(x: slide)
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.48)) {
+                slide = 0
+            }
+        }
+    }
+}
+
+/// Krug s ikonom i iznosom u redu dolazaka.
+private struct SupplyArrivalChip: View {
+    var drop: SupplyDrop
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.black.opacity(0.46))
+            Circle()
+                .stroke(Color.white.opacity(0.62), lineWidth: 2)
+            Group {
+                if let img = loadBarIcon(named: drop.icon) {
+                    Image(nsImage: img)
+                        .resizable()
+                        .scaledToFit()
+                        .padding(14)
+                } else {
+                    Image(systemName: drop.fallback)
+                        .font(.system(size: 26))
+                        .foregroundStyle(.white)
+                }
+            }
+            .offset(y: -8)
+            Text("+\(drop.amount)")
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.55), radius: 2, y: 1)
+                .offset(y: 22)
+        }
+        .frame(width: 78, height: 78)
     }
 }
 

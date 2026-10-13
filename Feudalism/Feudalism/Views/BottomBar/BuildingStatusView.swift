@@ -11,6 +11,7 @@ struct BuildingStatusView: View {
     @EnvironmentObject private var gameState: GameState
     let placementId: String
     let title: String
+    @Binding var marketFocused: Bool
 
     var body: some View {
         if let (layer, placement) = gameState.locatePlacement(id: placementId) {
@@ -24,10 +25,10 @@ struct BuildingStatusView: View {
 
     private func content(_ p: Placement, layer: MapLayer) -> some View {
         let state = gameState.buildingStates[p.id] ?? BuildingState()
-        let health = gameState.healthPercent(p)
         let cycle = WorkCycleCatalog.cycle(for: p.objectId)
         let faction = gameState.owner(of: p) ?? ""
         let mine = gameState.isOwnedByPlayer(p)
+        let name = ObjectCatalog.shared.object(id: p.objectId)?.name ?? ""
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 12) {
                 Text(title)
@@ -38,42 +39,31 @@ struct BuildingStatusView: View {
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Color(hex: seat.colorHex) ?? .white)
                 }
-                healthBar(health)
-                if state.isOnFire {
-                    Label("Gori", systemImage: "flame.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.orange)
+                if name == "Kula" {
+                    healthBar(gameState.healthPercent(p))
                 }
                 Spacer(minLength: 8)
-                if gameState.isFlammable(p) {
-                    smallButton(state.isOnFire ? "Ugasi" : "Zapali", systemImage: state.isOnFire ? "drop.fill" : "flame") {
-                        if state.isOnFire { gameState.extinguish(placementId: p.id) } else { gameState.ignite(placementId: p.id) }
-                    }
-                } else {
-                    Text("Ne gori")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.5))
-                }
                 if mine, gameState.hasSleepButton(for: p) {
                     smallButton(state.isClosed ? "Probudi" : "Spavaj", systemImage: state.isClosed ? "sun.max.fill" : "moon.zzz.fill") {
                         gameState.setWorkplaceClosed(placementId: p.id, closed: !state.isClosed)
                     }
                     .help("Spavanje šalje radnika vatri; novi ne dolazi dok se zgrada ne probudi.")
                 }
-                if mine, p.objectId != Castle.objectId {
-                    smallButton("Sruši", systemImage: "hammer.fill") {
-                        gameState.demolishPlacement(id: p.id)
-                    }
-                    .help("Srušeno se ne vraća; radnik ide natrag vatri.")
-                }
             }
             if mine, p.objectId == Training.objectId {
                 TrainingPanelView(faction: faction)
             }
-            if mine, p.objectId == Market.objectId {
-                MarketTradePanel()
+            if mine, p.objectId == Market.objectId, state.hasWorkerInside {
+                MarketStockPanel(focused: $marketFocused, sells: false, adjusts: true)
             }
-            if let kind = StorageKind.of(buildingId: p.objectId) {
+            if mine, p.objectId == Lager.objectId {
+                let room = gameState.lagerRoom(of: faction)
+                Text("Mjesta \(room.free) slobodna od \(room.total)")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.8))
+                MarketStockPanel(focused: $marketFocused, sells: gameState.marketIsWorking(), adjusts: false)
+            }
+            if let kind = StorageKind.of(buildingId: p.objectId), p.objectId != Lager.objectId {
                 storageInventory(kind, placement: p, faction: faction, mine: mine)
             }
             if mine, p.objectId == Smocnica.objectId {
@@ -82,11 +72,21 @@ struct BuildingStatusView: View {
             if p.objectId == Carriage.objectId {
                 transportPanel(p, faction: faction, mine: mine)
             }
-            if let cycle {
+            let problems = gameState.workplaceProblems(for: p, layer: layer).filter(\.showsOnBuilding)
+            if !problems.isEmpty {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 6)], alignment: .leading, spacing: 6) {
+                    ForEach(problems, id: \.self) { problem in
+                        Text(problem.text)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.red.opacity(0.42), in: Capsule())
+                    }
+                }
+            }
+            if let cycle, problems.isEmpty, (!cycle.inputs.isEmpty || !cycle.outputs.isEmpty), state.hasWorkerInside, !state.isOnFire {
                 HStack(spacing: 12) {
-                    Label(workerText(state, cycle: cycle, placement: p, layer: layer, faction: faction), systemImage: state.hasWorkerInside ? "person.fill.checkmark" : "person.fill.questionmark")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(state.hasWorkerInside ? .green : .white.opacity(0.75))
                     progressBar(state.progress / Double(cycle.durationTicks))
                     Text(cycleText(cycle, state: state))
                         .font(.system(size: 11, design: .monospaced))
@@ -363,6 +363,174 @@ struct BuildingStatusView: View {
                 .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct MarketStockPanel: View {
+    @EnvironmentObject private var gameState: GameState
+    @Binding var focused: Bool
+    /// Skladište, kad tržnica radi: klik na resurs otvara kupnju i prodaju.
+    var sells: Bool = false
+    /// Tržnica: plus i minus na zalihi.
+    var adjusts: Bool = false
+    @State private var selected: Good?
+
+    private var goods: [Good] {
+        [.gold] + Good.allCases.filter { $0 != .gold && $0 != .horse }
+    }
+
+    var body: some View {
+        Group {
+            if let selected {
+                focusedResource(selected)
+            } else {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 8), spacing: 16) {
+                    ForEach(goods, id: \.self) { good in
+                        stockCell(good)
+                    }
+                }
+                .padding(.top, 10)
+                .padding(.bottom, 6)
+            }
+        }
+        .onChange(of: selected?.rawValue) { value in
+            focused = value != nil
+        }
+    }
+
+    private func stockCell(_ good: Good) -> some View {
+        let amount = gameState.goodAmount(good)
+        return Button {
+            selected = good
+        } label: {
+            VStack(spacing: 4) {
+                resourceIcon(good)
+                    .frame(width: 52, height: 52)
+                Text("\(amount)")
+                    .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func focusedResource(_ good: Good) -> some View {
+        let amount = gameState.goodAmount(good)
+        return HStack(spacing: 16) {
+            menuBackButton("chevron.left")
+            Spacer(minLength: 0)
+            VStack(spacing: 8) {
+                resourceIcon(good)
+                    .frame(width: 92, height: 92)
+                Text(good.displayName)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                Text("\(amount)")
+                    .font(.system(size: 28, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white)
+                if sells, good != .gold, let quote = gameState.tradeQuote(good) {
+                    HStack(spacing: 10) {
+                        tradeButton("Kupi \(quote.buy)") { gameState.marketBuy(good) }
+                        tradeButton("Prodaj \(quote.sell)") { gameState.marketSell(good) }
+                    }
+                } else if adjusts, good != .gold {
+                    HStack(spacing: 10) {
+                        stepButton("-5") { gameState.adjustResource(id: good.rawValue, delta: -5) }
+                        stepButton("-1") { gameState.adjustResource(id: good.rawValue, delta: -1) }
+                        stepButton("+1") { gameState.adjustResource(id: good.rawValue, delta: 1) }
+                        stepButton("+5") { gameState.adjustResource(id: good.rawValue, delta: 5) }
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+            menuBackButton("chevron.right")
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func menuBackButton(_ systemName: String) -> some View {
+        Button {
+            selected = nil
+        } label: {
+            Image(systemName: systemName)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .background(Color.white.opacity(0.16), in: Circle())
+        }
+        .buttonStyle(.plain)
+        .help("Natrag na resurse")
+    }
+
+    private func resourceIcon(_ good: Good) -> some View {
+        Group {
+            if let img = loadBarIcon(named: marketIcon(good)) {
+                Image(nsImage: img)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                Image(systemName: "shippingbox.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+        }
+    }
+
+    private func tradeButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.white.opacity(0.16), in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func stepButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(.white)
+                .frame(width: 34, height: 28)
+                .background(Color.white.opacity(0.16), in: Circle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func marketIcon(_ good: Good) -> String {
+        switch good {
+        case .gold: return "gold"
+        case .wood: return "wood_resource"
+        case .stone: return "stone_resource"
+        case .iron: return "iron_resource"
+        case .hop: return "hop_resource"
+        case .beer: return "beer_resource"
+        case .food, .wheat, .flour: return "food"
+        case .bread: return "bread_resource"
+        case .hay: return "hay_resource"
+        case .apple: return "apple_resource"
+        case .cheese: return "cheese_resource"
+        case .meat: return "meat_resouce"
+        case .sausages: return "sosages_resouce"
+        case .vegetables: return "vegetables_resource"
+        case .wine: return "vine_resources"
+        case .candle: return "candle_resource"
+        case .corn: return "corn_resource"
+        case .eggs: return "eggs_resouce"
+        case .grapes: return "grapes_resource"
+        case .flowers: return "flowers_resoiurce"
+        case .spices: return "spices_resources"
+        case .leather: return "leather_resources"
+        case .shield: return "shield_resource"
+        case .spear: return "spear_resource"
+        case .sword: return "sword_resource"
+        case .bow: return "bow_and_sparrow_resouce"
+        default: return good.rawValue
+        }
     }
 }
 

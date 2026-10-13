@@ -171,6 +171,129 @@ extension GameState {
         warehouseRouteVersion += 1
     }
 
+    func lagerStores(of faction: String) -> [Placement] {
+        mapLogic.allPlacements.map(\.placement).filter {
+            $0.objectId == Lager.objectId && !$0.isDestroyed && owner(of: $0) == faction
+        }.sorted { buildingBirthRank($0.id) < buildingBirthRank($1.id) }
+    }
+
+    /// Zauzeta i slobodna polja 2×2. Puno polje zauzima novo mjesto za isti resurs.
+    func lagerRoom(of faction: String) -> (free: Int, total: Int) {
+        let total = lagerStores(of: faction).count * LagerPlan.bays.count
+        let used = min(total, stockedGoods(of: faction).reduce(0) { sum, good in
+            sum + baysNeeded(for: good, faction: faction)
+        })
+        return (max(0, total - used), total)
+    }
+
+    /// Ima li još mjesta za barem jednu jedinicu. Puno polje smije prijeći na sljedeće slobodno.
+    func lagerHasRoom(for good: Good, faction: String) -> Bool {
+        unitsThatFit(good, adding: 1, faction: faction) > 0
+    }
+
+    /// Koliko se jedinica može dodati: ostatak na trenutnom polju plus prazna polja.
+    /// Ne mijenja layout (izbjegava "Publishing changes from within view updates").
+    func unitsThatFit(_ good: Good, adding: Int, faction: String) -> Int {
+        guard adding > 0 else { return 0 }
+        if good == .gold { return adding }
+        let limit = WarehouseSpotNotebook.limit(for: good)
+        guard limit > 0 else { return 0 }
+        let stores = lagerStores(of: faction)
+        guard !stores.isEmpty else { return 0 }
+        let totalBays = stores.count * LagerPlan.bays.count
+        let have = goodAmount(good, of: faction)
+        let mine = baysNeeded(for: good, faction: faction)
+        var usedByOthers = 0
+        for other in Good.allCases where other != .gold && other != good {
+            usedByOthers += baysNeeded(for: other, faction: faction)
+        }
+        let free = max(0, totalBays - mine - usedByOthers)
+        let space = mine * limit - have + free * limit
+        return min(adding, max(0, space))
+    }
+
+    private func baysNeeded(for good: Good, faction: String) -> Int {
+        let amount = goodAmount(good, of: faction)
+        guard amount > 0 else { return 0 }
+        let limit = max(1, WarehouseSpotNotebook.limit(for: good))
+        return (amount + limit - 1) / limit
+    }
+
+    private func occupiedBays(of faction: String) -> [(store: String, bay: LagerPlan.Bay, good: Good)] {
+        var list: [(store: String, bay: LagerPlan.Bay, good: Good)] = []
+        for store in lagerStores(of: faction) {
+            let slots = warehouseLayouts[store.id]?.slots ?? []
+            for bay in LagerPlan.bays {
+                guard let slot = slots.first(where: { bay.contains(localRow: $0.localRow, localCol: $0.localCol) }),
+                      slot.good != .gold,
+                      goodAmount(slot.good, of: faction) > 0 else { continue }
+                list.append((store.id, bay, slot.good))
+            }
+        }
+        return list
+    }
+
+    private func stockedGoods(of faction: String) -> [Good] {
+        Good.allCases.filter { $0 != .gold && goodAmount($0, of: faction) > 0 }.sorted { $0.rawValue < $1.rawValue }
+    }
+
+    /// Popuni polja 2×2. Kad jedno polje prijeđe limit, isti resurs zauzme sljedeće slobodno.
+    func syncLagerBays(of faction: String) {
+        let stores = lagerStores(of: faction)
+        var taken: [(store: String, bay: LagerPlan.Bay, good: Good)] = []
+        for store in stores {
+            let slots = warehouseLayouts[store.id]?.slots ?? []
+            for bay in LagerPlan.bays {
+                guard let slot = slots.first(where: { bay.contains(localRow: $0.localRow, localCol: $0.localCol) }),
+                      slot.good != .gold,
+                      goodAmount(slot.good, of: faction) > 0 else { continue }
+                taken.append((store.id, bay, slot.good))
+            }
+        }
+        for good in stockedGoods(of: faction) {
+            let needed = baysNeeded(for: good, faction: faction)
+            var have = taken.filter { $0.good == good }.count
+            if have > needed {
+                var drop = have - needed
+                var kept: [(store: String, bay: LagerPlan.Bay, good: Good)] = []
+                for item in taken.reversed() {
+                    if item.good == good, drop > 0 {
+                        drop -= 1
+                        continue
+                    }
+                    kept.append(item)
+                }
+                taken = Array(kept.reversed())
+                have = needed
+            }
+            while have < needed {
+                guard let spot = freeLagerBay(stores: stores, taken: taken) else { break }
+                taken.append((spot.store, spot.bay, good))
+                have += 1
+            }
+        }
+        for store in stores {
+            var layout = warehouseLayouts[store.id] ?? WarehouseLayout(storeId: store.id, slots: [], routes: [])
+            let slots = taken.filter { $0.store == store.id }.map {
+                WarehouseSlot(localRow: $0.bay.row, localCol: $0.bay.col, good: $0.good)
+            }
+            if layout.slots != slots {
+                layout.slots = slots
+                warehouseLayouts[store.id] = layout
+                warehouseRouteVersion += 1
+            }
+        }
+    }
+
+    private func freeLagerBay(stores: [Placement], taken: [(store: String, bay: LagerPlan.Bay, good: Good)]) -> (store: String, bay: LagerPlan.Bay)? {
+        for store in stores {
+            for bay in LagerPlan.bays where !taken.contains(where: { $0.store == store.id && $0.bay == bay }) {
+                return (store.id, bay)
+            }
+        }
+        return nil
+    }
+
     func warehousePath(workplaceId: String, storeId: String, good: Good, from: PathPoint, to: PathPoint) -> [PathPoint]? {
         guard let route = warehouseLayouts[storeId]?.route(workplaceId: workplaceId, good: good), route.corners.count >= 2 else { return nil }
         var points = route.corners.map { PathPoint(row: $0.row, col: $0.col, layer: from.layer) }

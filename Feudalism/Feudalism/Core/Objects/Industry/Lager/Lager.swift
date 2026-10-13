@@ -2,37 +2,37 @@
 //  Lager.swift
 //  Feudalism
 //
-//  Skladište (lager) – 5×5. Četiri polja 2×2 i križ prolaza širine 1.
-//  Kategorija: industrija.
-//
-//    daske | hmelj
-//    ------+------
-//    kamen | željezo
-//
+//  Skladište (lager) – 5×5. Četiri polja 2×2, svako za jedan resurs.
+//  Ostale kocke su prolaz.
 
 import Foundation
 import SceneKit
 import AppKit
 
-/// Tlocrt skladišta: 2×2, prolaz, 2×2, i tako u krug. Srednji red i stupac su prolaz.
+/// Tlocrt skladišta: četiri polja 2×2 i križ prolaza od jedne kocke.
 enum LagerPlan {
     static let side = 5
     static let passage = 2
+
+    /// Jedno polje za slaganje jednog resursa. Vrh je gornji-lijevi kut 2×2.
+    struct Bay: Equatable {
+        var row: Int
+        var col: Int
+
+        func contains(localRow: Int, localCol: Int) -> Bool {
+            localRow >= row && localRow < row + 2 && localCol >= col && localCol < col + 2
+        }
+    }
+
+    static let bays: [Bay] = [
+        Bay(row: 0, col: 0), Bay(row: 0, col: 3),
+        Bay(row: 3, col: 0), Bay(row: 3, col: 3)
+    ]
 
     static func isPassage(localRow: Int, localCol: Int) -> Bool {
         guard localRow >= 0, localCol >= 0, localRow < side, localCol < side else { return false }
         return localRow == passage || localCol == passage
     }
-
-    /// Ćelija skladišta i roba čija naslaga na njoj stoji. Četiri unutarnja kuta su daska, hmelj, kamen i željezo.
-    static let stacks: [(good: Good, row: Int, col: Int)] = [
-        (.wood, 1, 1), (.hop, 1, 3),
-        (.stone, 3, 1), (.iron, 3, 3),
-        (.wheat, 0, 0), (.flour, 0, 1), (.beer, 1, 0),
-        (.hay, 0, 3), (.wool, 0, 4), (.corn, 1, 4),
-        (.grapes, 3, 0), (.wax, 4, 0), (.candle, 4, 1),
-        (.wine, 3, 4), (.spirits, 4, 3), (.spices, 4, 4)
-    ]
 }
 
 enum Lager: PlaceableSceneKitObject {

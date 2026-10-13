@@ -68,3 +68,39 @@ struct HUDMessage: Identifiable, Equatable {
         self.createdAt = createdAt
     }
 }
+
+/// Nedostatak za jednu građevinu koju igrač trenutno želi postaviti.
+struct BuildShortage: Equatable {
+    var objectId: String
+    var name: String
+    var lacks: [Good: Int]
+
+    var materials: [(good: Good, amount: Int)] {
+        lacks.filter { $0.key != .gold && $0.value > 0 }
+            .map { (good: $0.key, amount: $0.value) }
+            .sorted { $0.good.displayName < $1.good.displayName }
+    }
+
+    var goldShort: Int { lacks[.gold] ?? 0 }
+
+    /// Zlato za točno one tuđe resurse koji fale ovoj jednoj građevini. Cijena je iz tržnice.
+    var buyCost: Int {
+        materials.reduce(0) { sum, item in
+            let unit = MarketPrices.offers.first { $0.good == item.good }?.buy ?? PriceList.shopUnitPrice(item.good)
+            return sum + item.amount * unit
+        }
+    }
+
+    var lackText: String {
+        var parts = materials.map { Self.phrase($0.good, $0.amount) }
+        if goldShort > 0 { parts.append("\(goldShort) zlata") }
+        return parts.joined(separator: ", ")
+    }
+
+    private static func phrase(_ good: Good, _ amount: Int) -> String {
+        if good == .wood {
+            return amount == 1 ? "1 daska" : "\(amount) daske"
+        }
+        return "\(amount) \(good.displayName)"
+    }
+}

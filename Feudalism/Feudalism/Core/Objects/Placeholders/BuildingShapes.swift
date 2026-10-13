@@ -266,12 +266,12 @@ enum BuildingShapes {
 
     static func wineCellar() -> SCNNode {
         let root = named("wine_cellar")
-        k.slab(to: root, width: 5 * s, depth: 5 * s, color: k.stoneDark)
-        k.box(to: root, 4.2 * s, 1.8 * s, 3.6 * s, k.stone, at: SCNVector3(0, 0.95 * s, 0))
-        k.roof(to: root, width: 4.5 * s, length: 3.9 * s, height: 1.0 * s, color: k.roofDark, y: 1.8 * s)
-        k.box(to: root, 0.7 * s, 1.2 * s, 0.08 * s, k.door, at: SCNVector3(0, 0.65 * s, 1.85 * s))
+        k.slab(to: root, width: 4 * s, depth: 4 * s, color: k.stoneDark)
+        k.box(to: root, 3.4 * s, 1.8 * s, 2.9 * s, k.stone, at: SCNVector3(0, 0.95 * s, 0))
+        k.roof(to: root, width: 3.6 * s, length: 3.1 * s, height: 1.0 * s, color: k.roofDark, y: 1.8 * s)
+        k.box(to: root, 0.7 * s, 1.2 * s, 0.08 * s, k.door, at: SCNVector3(0, 0.65 * s, 1.5 * s))
         for i in 0..<4 {
-            k.cylinder(to: root, radius: 0.28 * s, height: 0.72 * s, color: k.timberDark, at: SCNVector3((-1.4 + CGFloat(i) * 0.9) * s, 0.42 * s, 2.15 * s), segments: 8)
+            k.cylinder(to: root, radius: 0.22 * s, height: 0.72 * s, color: k.timberDark, at: SCNVector3((-1.05 + CGFloat(i) * 0.7) * s, 0.42 * s, 1.7 * s), segments: 8)
                 .eulerAngles.z = CGFloat.pi / 2
         }
         return root

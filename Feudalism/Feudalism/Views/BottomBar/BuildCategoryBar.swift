@@ -64,10 +64,6 @@ struct BuildCategoryContent: View {
                     placementDebugLog("UI click castle/wall_small -> \(SmallWall.objectId)")
                     select(SmallWall.objectId)
                 },
-                onSelectMarket: {
-                    placementDebugLog("UI click castle/market -> \(Market.objectId)")
-                    select(Market.objectId)
-                },
                 onSelectCastle: {
                     placementDebugLog("UI click castle/castle -> \(Castle.objectId)")
                     select(Castle.objectId)
@@ -119,7 +115,11 @@ struct BuildCategoryContent: View {
                 onSelectStump: { select(Wood.objectId) },
                 onSelectIronMine: { select(Iron.objectId) },
                 onSelectStoneMine: { select(Stone.objectId) },
-                onSelectCarriage: { select(Carriage.objectId) }
+                onSelectCarriage: { select(Carriage.objectId) },
+                onSelectMarket: {
+                    placementDebugLog("UI click industry/market -> \(Market.objectId)")
+                    select(Market.objectId)
+                }
             )
         case .tools:
             ToolsButtonExpandedView(

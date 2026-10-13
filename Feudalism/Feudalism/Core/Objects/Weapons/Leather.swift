@@ -2,7 +2,7 @@
 //  Leather.swift
 //  Feudalism
 //
-//  Koža – placeholder 5×5. Kategorija: vojska.
+//  Koža – radionica 4×4 metra. Kategorija: vojska.
 //
 
 import Foundation
@@ -19,7 +19,7 @@ enum Leather: PlaceableSceneKitObject {
     }
 
     static func loadSceneKitNode(from bundle: Bundle = .main) -> SCNNode? {
-        WeaponYard.makeNode(name: "leather", craft: .leather)
+        WeaponYard.makeNode(name: "leather", craft: .leather, cells: ObjectDimensions.leather.cellWidth)
     }
 
     static func reapplyTexture(to node: SCNNode, bundle: Bundle = .main) -> Bool { true }

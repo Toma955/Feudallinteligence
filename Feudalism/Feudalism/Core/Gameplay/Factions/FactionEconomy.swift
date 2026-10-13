@@ -48,27 +48,43 @@ extension GameState {
             addGood(good, amount, tracksArrival: tracksArrival)
         } else {
             let before = tracksArrival && FoodRules.isStockFood(good) ? goodAmount(good, of: faction) : 0
-            factionStocks[faction, default: [:]][good] = max(0, goodAmount(good, of: faction) + amount)
+            let put: Int = amount > 0 && good != .gold ? unitsThatFit(good, adding: amount, faction: faction) : amount
+            guard put != 0 else { return }
+            factionStocks[faction, default: [:]][good] = max(0, goodAmount(good, of: faction) + put)
             if tracksArrival, FoodRules.isStockFood(good) {
                 recordFoodArrival(good, goodAmount(good, of: faction) - before, faction: faction)
+            }
+            if good != .gold {
+                warehouseGoodsEpoch &+= 1
+                DispatchQueue.main.async { [weak self] in
+                    self?.syncLagerBays(of: faction)
+                }
             }
         }
     }
 
-    /// Na početku partije svaka AI frakcija dobiva iste početne zalihe kao igrač.
+    /// Na početku partije svaka frakcija dobiva zlato. Ostalo samo ako ima skladište i slobodno polje.
     func seedFactionStocks() {
-        let fromPlayer = Dictionary(uniqueKeysWithValues: Good.allCases.map { ($0, goodAmount($0)) })
-        let file = StartingResourcesLoader.startingResources()
-        let fromFile: [Good: Int] = [
-            .gold: file.gold, .wood: file.wood, .iron: file.iron, .stone: file.stone,
-            .food: file.food, .hop: file.hop
-        ]
+        applyPendingStartGoods()
+        let desired: [Good: Int]
         if hasHumanPlayer {
-            factionStocks = Dictionary(uniqueKeysWithValues: realmSeats.seats
-                .filter { !isPlayerStock($0.id) }
-                .map { ($0.id, fromPlayer) })
+            desired = Dictionary(uniqueKeysWithValues: Good.allCases.map { ($0, goodAmount($0)) })
         } else {
-            factionStocks = Dictionary(uniqueKeysWithValues: realmSeats.seats.map { ($0.id, fromFile) })
+            let file = StartingResourcesLoader.startingResources()
+            desired = [
+                .gold: file.gold, .wood: file.wood, .iron: file.iron, .stone: file.stone,
+                .food: file.food, .hop: file.hop, .hay: file.hay
+            ]
+        }
+        for seat in realmSeats.seats where !isPlayerStock(seat.id) {
+            factionStocks[seat.id] = [:]
+            for good in Good.allCases.sorted(by: { $0.rawValue < $1.rawValue }) {
+                let amount = desired[good] ?? 0
+                guard amount > 0 else { continue }
+                if good == .gold || lagerHasRoom(for: good, faction: seat.id) {
+                    addGood(good, amount, to: seat.id)
+                }
+            }
         }
     }
 

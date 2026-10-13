@@ -2,7 +2,7 @@
 //  Bakery.swift
 //  Feudalism
 //
-//  Privremeni placeholder: pekara 2×2, visina 2. Kasnije zamijeniti stvarnim modelom.
+//  Pekara – 4×4 metra. Kategorija: hrana.
 //
 
 import Foundation

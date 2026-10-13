@@ -122,7 +122,6 @@ extension ObjectCategory {
                 Well.gameObject,
                 Spring.gameObject,
                 Hotel.gameObject,
-                Market.gameObject,
                 Stable.gameObject,
                 Gates.gameObject,
                 Miners.gameObject,
@@ -151,7 +150,8 @@ extension ObjectCategory {
                 Wood.gameObject,
                 Carriage.gameObject,
                 Iron.gameObject,
-                Stone.gameObject
+                Stone.gameObject,
+                Market.gameObject
             ]
         case .infrastruktura:
             return [

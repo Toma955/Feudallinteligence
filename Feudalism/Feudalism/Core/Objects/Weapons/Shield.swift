@@ -2,7 +2,7 @@
 //  Shield.swift
 //  Feudalism
 //
-//  Štit – placeholder 5×5. Kategorija: vojska.
+//  Štit – radionica 4×4 metra. Kategorija: vojska.
 //
 
 import Foundation
@@ -19,7 +19,7 @@ enum Shield: PlaceableSceneKitObject {
     }
 
     static func loadSceneKitNode(from bundle: Bundle = .main) -> SCNNode? {
-        WeaponYard.makeNode(name: "shield", craft: .shield)
+        WeaponYard.makeNode(name: "shield", craft: .shield, cells: ObjectDimensions.shield.cellWidth)
     }
 
     static func reapplyTexture(to node: SCNNode, bundle: Bundle = .main) -> Bool { true }

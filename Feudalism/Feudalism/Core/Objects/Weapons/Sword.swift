@@ -2,7 +2,7 @@
 //  Sword.swift
 //  Feudalism
 //
-//  Mač – radionica 5×5. Kategorija: vojska.
+//  Mač – radionica 4×4 metra. Kategorija: vojska.
 //
 
 import Foundation
@@ -19,7 +19,7 @@ enum Sword: PlaceableSceneKitObject {
     }
 
     static func loadSceneKitNode(from bundle: Bundle = .main) -> SCNNode? {
-        WeaponYard.makeNode(name: "sword", craft: .sword)
+        WeaponYard.makeNode(name: "sword", craft: .sword, cells: ObjectDimensions.sword.cellWidth)
     }
 
     static func reapplyTexture(to node: SCNNode, bundle: Bundle = .main) -> Bool { true }

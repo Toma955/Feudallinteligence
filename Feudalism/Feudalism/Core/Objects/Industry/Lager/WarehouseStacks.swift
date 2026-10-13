@@ -2,8 +2,8 @@
 //  WarehouseStacks.swift
 //  Feudalism
 //
-//  Naslage na poljima 2×2. Daska, hmelj, kamen i željezo stoje uz prolaz,
-//  ostala roba skladišta na vanjskim ćelijama istog polja.
+//  Jedno polje 2×2 = jedan resurs. Kupnja diže hrpu, prodaja je spušta.
+//  Hrpe se crte u "warehouse_stock" unutar modela skladišta (kao košare u smočnici).
 //
 
 import Foundation
@@ -11,135 +11,181 @@ import SceneKit
 import AppKit
 
 enum WarehouseStacks {
-    private static let maxLayers = 8
+    /// Lokalni centri polja 2×2 u modelu lagera (isti raspored kao padovi u BuildingShapes.lager).
+    private static let baySpots: [(bay: LagerPlan.Bay, x: CGFloat, z: CGFloat)] = [
+        (LagerPlan.Bay(row: 0, col: 0), -1.5, -1.5),
+        (LagerPlan.Bay(row: 0, col: 3), 1.5, -1.5),
+        (LagerPlan.Bay(row: 3, col: 0), -1.5, 1.5),
+        (LagerPlan.Bay(row: 3, col: 3), 1.5, 1.5)
+    ]
+
+    /// Visina vrha jastuka u modelu (base + pad).
+    private static let padTopY: CGFloat = 0.21
 
     static func stockKey(_ gameState: GameState) -> String {
-        let stores = gameState.gameMap.placements.filter { $0.objectId == Lager.objectId && !$0.isDestroyed }
-        var seen: Set<String> = []
-        var parts: [String] = ["v\(gameState.placementsVersion)"]
-        for placement in stores.sorted(by: { $0.id < $1.id }) {
-            let owner = gameState.owner(of: placement) ?? ""
-            if seen.contains(owner) {
-                parts.append("\(placement.id):-")
-                continue
-            }
-            seen.insert(owner)
-            let bits = LagerPlan.stacks.map { "\($0.good.rawValue):\(gameState.goodAmount($0.good, of: owner))" }.joined(separator: ",")
-            parts.append("\(placement.id):\(bits)")
+        var parts: [String] = [
+            "v\(gameState.placementsVersion)",
+            "e\(gameState.warehouseGoodsEpoch)"
+        ]
+        let stores = gameState.gameMap.placements
+            .filter { $0.objectId == Lager.objectId && !$0.isDestroyed }
+            .sorted { $0.id < $1.id }
+        for placement in stores {
+            let owner = gameState.owner(of: placement) ?? gameState.playerSeat?.id ?? ""
+            let amounts = Good.allCases
+                .filter { $0 != .gold }
+                .map { "\($0.rawValue):\(gameState.goodAmount($0, of: owner))" }
+                .joined(separator: ",")
+            parts.append("\(placement.id)@\(owner)=\(amounts)")
         }
         return parts.joined(separator: "|")
     }
 
+    /// Osvježi hrpe u svim skladištima pod `placements` čvorom. Samo main thread.
     static func refresh(in root: SCNNode, gameState: GameState) {
-        let stores = gameState.gameMap.placements.filter { $0.objectId == Lager.objectId && !$0.isDestroyed }
-        var seen: Set<String> = []
-        var counts: [String: [Good: Int]] = [:]
-        for placement in stores.sorted(by: { $0.id < $1.id }) {
-            let owner = gameState.owner(of: placement) ?? ""
-            var pile: [Good: Int] = [:]
-            if !seen.contains(owner) {
-                seen.insert(owner)
-                for spot in LagerPlan.stacks {
-                    pile[spot.good] = gameState.goodAmount(spot.good, of: owner)
+        let stores = gameState.gameMap.placements
+            .filter { $0.objectId == Lager.objectId && !$0.isDestroyed }
+            .sorted { gameState.buildingBirthRank($0.id) < gameState.buildingBirthRank($1.id) }
+
+        var byOwner: [String: [Placement]] = [:]
+        for store in stores {
+            let owner = gameState.owner(of: store) ?? gameState.playerSeat?.id ?? ""
+            byOwner[owner, default: []].append(store)
+        }
+
+        var assignment: [String: [(bay: LagerPlan.Bay, good: Good, amount: Int)]] = [:]
+        for (owner, list) in byOwner {
+            var free: [(storeId: String, bay: LagerPlan.Bay)] = []
+            for store in list {
+                for bay in LagerPlan.bays { free.append((store.id, bay)) }
+            }
+            var cursor = 0
+            for good in Good.allCases where good != .gold {
+                var left = gameState.goodAmount(good, of: owner)
+                guard left > 0 else { continue }
+                let limit = max(1, WarehouseSpotNotebook.limit(for: good))
+                while left > 0, cursor < free.count {
+                    let n = min(limit, left)
+                    let spot = free[cursor]
+                    assignment[spot.storeId, default: []].append((spot.bay, good, n))
+                    left -= n
+                    cursor += 1
                 }
             }
-            counts[placement.id] = pile
         }
+
         root.enumerateChildNodes { node, _ in
             guard let name = node.name, name.hasPrefix("lager_place_") else { return }
             let id = String(name.dropFirst("lager_place_".count))
-            let stock = node.childNode(withName: "warehouse_stock", recursively: false) ?? {
-                let made = SCNNode()
-                made.name = "warehouse_stock"
-                node.addChildNode(made)
-                return made
-            }()
-            let pile = counts[id] ?? [:]
-            for spot in LagerPlan.stacks {
-                updatePile(spot.good, count: pile[spot.good] ?? 0, row: spot.row, col: spot.col, on: stock)
+            guard let host = node.childNode(withName: "lager", recursively: true) else { return }
+            let stock: SCNNode
+            if let existing = host.childNode(withName: "warehouse_stock", recursively: false) {
+                stock = existing
+            } else {
+                let created = SCNNode()
+                created.name = "warehouse_stock"
+                host.addChildNode(created)
+                stock = created
             }
+            fill(stock: stock, piles: assignment[id] ?? [])
         }
     }
 
-    private static func updatePile(_ good: Good, count: Int, row: Int, col: Int, on stock: SCNNode) {
-        let layers = min(max(0, count), maxLayers)
-        let name = "pile_\(good.rawValue)"
-        let pile: SCNNode
-        if let existing = stock.childNode(withName: name, recursively: false) {
-            pile = existing
-        } else {
-            pile = SCNNode()
-            pile.name = name
-            let step = PlaceholderBox.worldUnitsPerCell
-            pile.position = SCNVector3((CGFloat(col) - 2) * step, 0, (CGFloat(row) - 2) * step)
-            stock.addChildNode(pile)
+    private static func fill(stock: SCNNode, piles: [(bay: LagerPlan.Bay, good: Good, amount: Int)]) {
+        let step = BuildingKit.cell
+        let sig = piles
+            .map { "\($0.bay.row),\($0.bay.col):\($0.good.rawValue):\($0.amount)" }
+            .sorted()
+            .joined(separator: "|")
+        let markName = "wsig"
+        if let mark = stock.childNode(withName: markName, recursively: false),
+           mark.childNodes.first?.name == sig {
+            return
         }
-        let have = pile.childNodes.count
-        if layers < have {
-            for child in pile.childNodes.suffix(have - layers) {
-                child.removeFromParentNode()
-            }
-        }
-        let step = PlaceholderBox.worldUnitsPerCell
-        let padTop = step * 0.21
-        guard layers > have else { return }
-        for index in have..<layers {
-            let piece = makePiece(good, index: index, step: step)
-            let height = pieceHeight(good, step: step)
-            let place = SCNVector3(pieceJitter(index, step: step).x, padTop + height * (CGFloat(index) + 0.5), pieceJitter(index, step: step).z)
-            let finalScale = piece.scale
-            piece.position = SCNVector3(place.x, place.y + step * 0.7, place.z)
-            piece.scale = SCNVector3(0.05, 0.05, 0.05)
-            let wait = SCNAction.wait(duration: Double(index - have) * 0.06)
-            let drop = SCNAction.group([
-                SCNAction.move(to: place, duration: 0.28),
-                SCNAction.scale(to: CGFloat(finalScale.x), duration: 0.28)
-            ])
-            drop.timingMode = .easeOut
-            piece.runAction(SCNAction.sequence([wait, drop]))
-            pile.addChildNode(piece)
+        stock.childNodes.forEach { $0.removeFromParentNode() }
+        let mark = SCNNode()
+        mark.name = markName
+        let tag = SCNNode()
+        tag.name = sig.isEmpty ? "-" : sig
+        mark.addChildNode(tag)
+        stock.addChildNode(mark)
+
+        for pile in piles {
+            guard let spot = baySpots.first(where: { $0.bay == pile.bay }) else { continue }
+            let marker = makeMarker(pile.good, step: step)
+            let limit = max(1, WarehouseSpotNotebook.limit(for: pile.good))
+            let fill = max(0.35, min(1, CGFloat(pile.amount) / CGFloat(limit)))
+            marker.scale = SCNVector3(1, fill, 1)
+            marker.position = SCNVector3(spot.x * step, padTopY * step, spot.z * step)
+            marker.name = "pile-\(pile.bay.row)-\(pile.bay.col)"
+            marker.categoryBitMask = 0
+            marker.renderingOrder = 50
+            stock.addChildNode(marker)
         }
     }
 
-    private static func pieceJitter(_ index: Int, step: CGFloat) -> (x: CGFloat, z: CGFloat) {
-        let x = CGFloat((index % 3) - 1) * step * 0.04
-        let z = CGFloat(((index / 3) % 3) - 1) * step * 0.04
-        return (x, z)
-    }
-
-    private static func pieceHeight(_ good: Good, step: CGFloat) -> CGFloat {
-        switch good {
-        case .wood: return step * 0.06
-        case .stone: return step * 0.22
-        case .iron: return step * 0.1
-        case .hop: return step * 0.16
-        default: return step * 0.2
-        }
-    }
-
-    private static func makePiece(_ good: Good, index: Int, step: CGFloat) -> SCNNode {
-        let box: SCNBox
-        let material: SCNMaterial
+    /// Oznaka na polju: daska, kamen, metal ili vreće brašna.
+    private static func makeMarker(_ good: Good, step: CGFloat) -> SCNNode {
+        let root = SCNNode()
+        root.categoryBitMask = 0
         switch good {
         case .wood:
-            box = SCNBox(width: step * 0.62, height: step * 0.055, length: step * 0.26, chamferRadius: step * 0.008)
-            material = woodMaterial
+            for i in 0..<6 {
+                let plank = box(width: step * 1.55, height: step * 0.09, length: step * 0.78, material: woodMaterial)
+                plank.position = SCNVector3(0, step * 0.09 * (CGFloat(i) + 0.5), 0)
+                plank.eulerAngles.y = i.isMultiple(of: 2) ? 0.05 : -0.07
+                root.addChildNode(plank)
+            }
         case .stone:
-            box = SCNBox(width: step * 0.4, height: step * 0.2, length: step * 0.34, chamferRadius: step * 0.02)
-            material = stoneMaterial
+            let lower = box(width: step * 1.25, height: step * 0.42, length: step * 1.05, material: stoneMaterial)
+            lower.position = SCNVector3(0, step * 0.21, 0)
+            let upper = box(width: step * 0.85, height: step * 0.32, length: step * 0.7, material: stoneMaterial)
+            upper.position = SCNVector3(step * 0.12, step * 0.58, step * -0.08)
+            upper.eulerAngles.y = 0.2
+            root.addChildNode(lower)
+            root.addChildNode(upper)
         case .iron:
-            box = SCNBox(width: step * 0.46, height: step * 0.09, length: step * 0.2, chamferRadius: step * 0.012)
-            material = ironMaterial
-        case .hop:
-            box = SCNBox(width: step * 0.34, height: step * 0.14, length: step * 0.26, chamferRadius: step * 0.03)
-            material = solid(NSColor(red: 0.34, green: 0.48, blue: 0.18, alpha: 1))
+            for i in 0..<5 {
+                let bar = box(width: step * 1.4, height: step * 0.08, length: step * 0.32, material: ironMaterial)
+                bar.position = SCNVector3(0, step * 0.08 * (CGFloat(i) + 0.5), CGFloat(i - 2) * step * 0.015)
+                bar.eulerAngles.y = 0.08
+                root.addChildNode(bar)
+            }
+        case .flour:
+            let cloth = solid(NSColor(red: 0.93, green: 0.88, blue: 0.74, alpha: 1))
+            let tie = solid(NSColor(red: 0.55, green: 0.36, blue: 0.2, alpha: 1))
+            let spots: [(CGFloat, CGFloat)] = [(-0.28, 0.05), (0.22, -0.12), (0.02, 0.22)]
+            for (i, spot) in spots.enumerated() {
+                let sack = SCNNode()
+                let body = SCNSphere(radius: step * 0.32)
+                body.materials = [cloth]
+                let bodyNode = SCNNode(geometry: body)
+                bodyNode.scale = SCNVector3(1.05, 1.35, 0.82)
+                bodyNode.categoryBitMask = 0
+                let neck = SCNCylinder(radius: step * 0.07, height: step * 0.14)
+                neck.materials = [tie]
+                let neckNode = SCNNode(geometry: neck)
+                neckNode.position = SCNVector3(0, step * 0.38, 0)
+                neckNode.categoryBitMask = 0
+                sack.addChildNode(bodyNode)
+                sack.addChildNode(neckNode)
+                sack.position = SCNVector3(spot.0 * step, step * 0.34, spot.1 * step)
+                sack.eulerAngles.z = i == 1 ? 0.18 : -0.08
+                root.addChildNode(sack)
+            }
         default:
-            box = SCNBox(width: step * 0.3, height: step * 0.18, length: step * 0.3, chamferRadius: step * 0.02)
-            material = solid(crateColor(good))
+            let crate = box(width: step * 0.9, height: step * 0.55, length: step * 0.9, material: solid(crateColor(good)))
+            crate.position = SCNVector3(0, step * 0.28, 0)
+            root.addChildNode(crate)
         }
-        box.materials = Array(repeating: material, count: 6)
-        let node = SCNNode(geometry: box)
-        node.eulerAngles.y = index.isMultiple(of: 2) ? 0.12 : -0.18
+        return root
+    }
+
+    private static func box(width: CGFloat, height: CGFloat, length: CGFloat, material: SCNMaterial) -> SCNNode {
+        let geometry = SCNBox(width: width, height: height, length: length, chamferRadius: min(width, length) * 0.02)
+        geometry.materials = Array(repeating: material, count: 6)
+        let node = SCNNode(geometry: geometry)
+        node.categoryBitMask = 0
         return node
     }
 
@@ -162,46 +208,30 @@ enum WarehouseStacks {
 
     private static let woodMaterial = textured(
         color: "Wood096_1K-JPG_Color",
-        normal: "Wood096_1K-JPG_NormalGL",
-        rough: "Wood096_1K-JPG_Roughness",
-        metal: nil,
         fallback: NSColor(red: 0.72, green: 0.52, blue: 0.28, alpha: 1)
     )
     private static let stoneMaterial = textured(
         color: "Rock030_1K-JPG_Color",
-        normal: "Rock030_1K-JPG_NormalGL",
-        rough: "Rock030_1K-JPG_Roughness",
-        metal: nil,
         fallback: NSColor(red: 0.58, green: 0.56, blue: 0.52, alpha: 1)
     )
     private static let ironMaterial = textured(
         color: "Metal053C_1K-JPG_Color",
-        normal: "Metal053C_1K-JPG_NormalGL",
-        rough: "Metal053C_1K-JPG_Roughness",
-        metal: "Metal053C_1K-JPG_Metalness",
         fallback: NSColor(red: 0.45, green: 0.47, blue: 0.50, alpha: 1)
     )
 
     private static func solid(_ color: NSColor) -> SCNMaterial {
         let mat = SCNMaterial()
         mat.diffuse.contents = color
-        mat.lightingModel = .physicallyBased
+        mat.ambient.contents = color
+        mat.lightingModel = .constant
+        mat.isDoubleSided = true
         return mat
     }
 
-    private static func textured(color: String, normal: String, rough: String, metal: String?, fallback: NSColor) -> SCNMaterial {
-        let mat = SCNMaterial()
-        mat.diffuse.contents = image(color) ?? fallback
-        mat.lightingModel = .physicallyBased
-        if let normalImage = image(normal) {
-            mat.normal.contents = normalImage
-            mat.normal.intensity = 0.8
-        }
-        if let roughImage = image(rough) {
-            mat.roughness.contents = roughImage
-        }
-        if let metal, let metalImage = image(metal) {
-            mat.metalness.contents = metalImage
+    private static func textured(color: String, fallback: NSColor) -> SCNMaterial {
+        let mat = solid(fallback)
+        if let image = image(color) {
+            mat.diffuse.contents = image
         }
         return mat
     }

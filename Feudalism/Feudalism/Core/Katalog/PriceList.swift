@@ -108,6 +108,16 @@ enum PriceList {
     static func soldierPrice(_ type: SoldierType) -> Price {
         Price(items: type.equipment.merging([.gold: type.gold]) { $0 + $1 })
     }
+
+    /// Koliko zlata stoji jedna jedinica robe. Zlato se ne kupuje.
+    static func shopUnitPrice(_ good: Good) -> Int {
+        switch good {
+        case .gold: return 0
+        case .iron: return 4
+        case .wood, .stone: return 2
+        default: return 3
+        }
+    }
 }
 
 extension GameState {

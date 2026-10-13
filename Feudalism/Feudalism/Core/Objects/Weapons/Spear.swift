@@ -2,7 +2,7 @@
 //  Spear.swift
 //  Feudalism
 //
-//  Koplje – placeholder 5×5. Kategorija: vojska.
+//  Koplje – radionica 4×4 metra. Kategorija: vojska.
 //
 
 import Foundation
@@ -19,7 +19,7 @@ enum Spear: PlaceableSceneKitObject {
     }
 
     static func loadSceneKitNode(from bundle: Bundle = .main) -> SCNNode? {
-        WeaponYard.makeNode(name: "spear", craft: .spear)
+        WeaponYard.makeNode(name: "spear", craft: .spear, cells: ObjectDimensions.spear.cellWidth)
     }
 
     static func reapplyTexture(to node: SCNNode, bundle: Bundle = .main) -> Bool { true }
