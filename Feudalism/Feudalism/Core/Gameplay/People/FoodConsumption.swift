@@ -3,7 +3,7 @@
 //  Feudalism
 //
 //  Hrana se troši tek kad frakcija ima smočnicu i barem jednu mjeru hrane.
-//  Svakih 45 s (jedno godišnje doba) ode točno jedna mjera, prva koja je ušla (FIFO).
+//  Svakih 60 s (jedno godišnje doba) ode točno jedna mjera, prva koja je ušla (FIFO).
 //  Jabuke, sir i ostalo su ista mjera; redoslijed ulaska određuje što izlazi.
 //  Glad spušta sreću (Happiness.swift). Pravila su ista za igrača i AI lordove.
 //
@@ -11,7 +11,7 @@
 import Foundation
 
 enum FoodRules {
-    /// Jedna mjera hrane po ovom broju poteza. Grafika: 1 potez = 1 s, dakle 45 s.
+    /// Jedna mjera hrane po ovom broju poteza. Grafika: 1 potez = 1 s, dakle 60 s.
     static let ticksPerMeal = Season.turnsPerSeason
     /// Jedna mjera po obroku, ne po osobi. Ostaje u pravilniku AI-a.
     static let portionPerPerson = 1

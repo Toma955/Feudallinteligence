@@ -81,9 +81,11 @@ private func makeTerrainCGImage(gameMap: GameMap, tileImages: [PovrsinaType: CGI
                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
     let gray: CGFloat = 0.42
     let fallbackColor = (gray, gray, gray)
+    EarthTiles.paint(in: ctx, rows: rows, cols: cols, scale: scale, tiles: EarthTiles.images)
     for row in 0..<rows {
         for col in 0..<cols {
             let surface = gameMap.cell(row: row, col: col)?.povrsina ?? .default
+            if surface == .tlo { continue }
             let y = rows - 1 - row
             let rect = CGRect(x: col * scale, y: y * scale, width: scale, height: scale)
             if let tile = tileImages[surface] {
@@ -169,8 +171,6 @@ private func makeTerrainGeometryWithHeights(gameMap: GameMap) -> SCNGeometry? {
     var uvs: [CGPoint] = []
     var colors: [Float] = []
     var topIndices: [Int32] = []
-    // Ploča = 5 točaka (4 kuta + sredina), 4 trokuta oko sredine.
-    let tile = terrainMetersPerRepeat
     let coveredByFloors = cellsCoveredByBuildingFloors(gameMap)
     for r in 0..<rows {
         for c in 0..<cols {
@@ -181,7 +181,9 @@ private func makeTerrainGeometryWithHeights(gameMap: GameMap) -> SCNGeometry? {
                 let x = -halfW + point.x * stepW
                 let z = -halfH + point.z * stepH
                 vertices.append(SCNVector3(x, -z, point.height))
-                uvs.append(CGPoint(x: x / tile, y: z / tile))
+                let mapW = CGFloat(cols) * stepW
+                let mapH = CGFloat(rows) * stepH
+                uvs.append(CGPoint(x: (x + halfW) / mapW, y: (z + halfH) / mapH))
                 colors.append(contentsOf: tint)
             }
             let center = base + 4
@@ -327,32 +329,13 @@ private func applyTerrainPBR(to mat: SCNMaterial, diffuseContents: Any?) {
     }
 }
 
-/// Zemlja: boja tla vidljiva na dalekoj i bliskoj kameri, bez PBR sloja koji je gasi.
-private func applyTerrainPBRTiled(to mat: SCNMaterial) {
-    let groundTile = TerrainTextureLoader.shared.tileImage(for: .grass, bundle: .main)
-    let diffuseContents: Any? = groundTile.flatMap { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }
-    mat.diffuse.contents = diffuseContents ?? terrainFallbackColor
-    mat.diffuse.wrapS = .repeat
-    mat.diffuse.wrapT = .repeat
-    mat.diffuse.contentsTransform = terrainTextureFlipVTransform()
-    mat.diffuse.mipFilter = .linear
-    mat.diffuse.maxAnisotropy = 16
-    mat.lightingModel = .blinn
-    mat.locksAmbientWithDiffuse = true
-    mat.ambient.contents = NSColor.white
-    mat.specular.contents = NSColor(white: 0.12, alpha: 1)
-    mat.shininess = 0.05
-    mat.isDoubleSided = true
-    if let normalCG = TerrainTextureLoader.shared.groundNormalImage(bundle: .main) {
-        let normalImg = NSImage(cgImage: normalCG, size: NSSize(width: normalCG.width, height: normalCG.height))
-        mat.normal.contents = normalImg
-        mat.normal.intensity = 0.35
-        mat.normal.wrapS = .repeat
-        mat.normal.wrapT = .repeat
-        mat.normal.mipFilter = .linear
-        mat.normal.maxAnisotropy = 8
-        mat.normal.contentsTransform = terrainTextureFlipVTransform()
+/// Gola zemlja je jedan sloj. Shader miješa tri teksture po pikselu.
+private func applyTerrainPBRTiled(to mat: SCNMaterial, gameMap: GameMap? = nil) {
+    if let gameMap {
+        EarthGroundMaterial.applyTerrain(mat, map: gameMap)
+        return
     }
+    EarthGroundMaterial.applyPreview(mat)
 }
 
 /// Ravnina terena kao mreža kvadova: jedan quad po ćeliji, UV 0–1 po ćeliji da svaka kocka ima svoju ground teksturu.
@@ -376,11 +359,14 @@ private func makeProceduralTerrainGrid(rows: Int, cols: Int) -> SCNGeometry? {
             vertices.append(SCNVector3(x1, -z0, 0))
             vertices.append(SCNVector3(x1, -z1, 0))
             vertices.append(SCNVector3(x0, -z1, 0))
-            let tile = terrainMetersPerRepeat
-            uvs.append(CGPoint(x: x0 / tile, y: z0 / tile))
-            uvs.append(CGPoint(x: x1 / tile, y: z0 / tile))
-            uvs.append(CGPoint(x: x1 / tile, y: z1 / tile))
-            uvs.append(CGPoint(x: x0 / tile, y: z1 / tile))
+            let u0 = CGFloat(c) / CGFloat(cols)
+            let u1 = CGFloat(c + 1) / CGFloat(cols)
+            let v0 = CGFloat(r) / CGFloat(rows)
+            let v1 = CGFloat(r + 1) / CGFloat(rows)
+            uvs.append(CGPoint(x: u0, y: v0))
+            uvs.append(CGPoint(x: u1, y: v0))
+            uvs.append(CGPoint(x: u1, y: v1))
+            uvs.append(CGPoint(x: u0, y: v1))
             indices.append(contentsOf: [base, base + 1, base + 2, base, base + 2, base + 3])
         }
     }
@@ -405,7 +391,7 @@ private func makeProceduralTerrainGrid(rows: Int, cols: Int) -> SCNGeometry? {
 /// Teren iz spremljene mape: visine ćelija, ista orijentacija kao ravni teren.
 private func makeHeightTerrainNode(gameMap: GameMap) -> SCNNode {
     let mat = SCNMaterial()
-    applyTerrainPBRTiled(to: mat)
+    applyTerrainPBRTiled(to: mat, gameMap: gameMap)
     let node = SCNNode()
     if let geo = makeTerrainGeometryWithHeights(gameMap: gameMap) {
         if geo.elements.count > 1 {
@@ -431,11 +417,11 @@ private func makeHeightTerrainNode(gameMap: GameMap) -> SCNNode {
 
 /// Proceduralni teren: mreža kvadova (jedan po ćeliji), svaka ćelija s ground teksturom (UV 0–1).
 /// width/height u world jedinicama: cols×40, rows×40.
-private func makeProceduralTerrainNode(width: CGFloat, height: CGFloat, terrainTexture: Any? = nil) -> SCNNode {
+private func makeProceduralTerrainNode(width: CGFloat, height: CGFloat, terrainTexture: Any? = nil, gameMap: GameMap? = nil) -> SCNNode {
     let cols = max(1, Int(round(width / worldUnitsPerCell)))
     let rows = max(1, Int(round(height / worldUnitsPerCell)))
     let terrainMat = SCNMaterial()
-    applyTerrainPBRTiled(to: terrainMat)
+    applyTerrainPBRTiled(to: terrainMat, gameMap: gameMap)
     if let gridGeo = makeProceduralTerrainGrid(rows: rows, cols: cols) {
         gridGeo.materials = [terrainMat]
         let planeNode = SCNNode(geometry: gridGeo)
@@ -1524,7 +1510,10 @@ private func buildPadOverlayColor(_ cell: MapCell, row: Int, col: Int) -> [Float
         return [0.62, 0.62, 0.66]
     case .wood, nil:
         if cell.povrsina == .plodna { return [0.16, 0.68, 0.22] }
-        if cell.povrsina == .tlo { return [0.38, 0.58, 0.24] }
+        if cell.povrsina == .pustinja { return [0.86, 0.76, 0.48] }
+        if cell.povrsina == .voda { return [0.25, 0.55, 0.86] }
+        if cell.povrsina == .more { return [0.08, 0.22, 0.55] }
+        if cell.povrsina == .mocvara { return [0.28, 0.38, 0.22] }
         return nil
     }
 }
@@ -1978,8 +1967,8 @@ struct SceneKitMapView: NSViewRepresentable {
         let rows = gameState.gameMap.rows
         let cols = gameState.gameMap.cols
         var level: LoadedLevel?
-        // Solo s mapom iz datoteke (Maps/…): teren iz gameMap (kao u Map Editoru).
-        if gameState.isSoloMode && gameState.soloMapLoadedFromFile {
+        // Solo i mapa iz datoteke: teren iz ćelija, podloga je tlo.
+        if gameState.isSoloMode && !gameState.isMapEditorMode {
             DispatchQueue.main.async {
                 let hasBuildings = !gameState.gameMap.placements.isEmpty
                 gameState.levelLoadingMessage = hasBuildings
@@ -2006,7 +1995,7 @@ struct SceneKitMapView: NSViewRepresentable {
                     }
                     let w = effectiveMapWorldW(cols: cols)
                     let h = effectiveMapWorldH(rows: rows)
-                    let proceduralTerrain = makeProceduralTerrainNode(width: w, height: h, terrainTexture: terrainTextureOnMainThread)
+                    let proceduralTerrain = makeProceduralTerrainNode(width: w, height: h, terrainTexture: terrainTextureOnMainThread, gameMap: gameState.gameMap)
                     level = SceneKitLevelLoader.generateAndSaveSoloLevel(terrainNode: proceduralTerrain)
                 }
             }
@@ -2019,7 +2008,7 @@ struct SceneKitMapView: NSViewRepresentable {
             }
             let w = effectiveMapWorldW(cols: cols)
             let h = effectiveMapWorldH(rows: rows)
-            let proceduralTerrain = makeProceduralTerrainNode(width: w, height: h, terrainTexture: terrainTextureOnMainThread)
+            let proceduralTerrain = makeProceduralTerrainNode(width: w, height: h, terrainTexture: terrainTextureOnMainThread, gameMap: gameState.gameMap)
             proceduralTerrain.position = SCNVector3Zero
             scene.rootNode.addChildNode(proceduralTerrain)
             return
@@ -2035,13 +2024,13 @@ struct SceneKitMapView: NSViewRepresentable {
             if level.terrainNode == nil {
                 let w = effectiveMapWorldW(cols: cols)
                 let h = effectiveMapWorldH(rows: rows)
-                let fallbackPlane = makeProceduralTerrainNode(width: w, height: h, terrainTexture: terrainTextureOnMainThread)
+                let fallbackPlane = makeProceduralTerrainNode(width: w, height: h, terrainTexture: terrainTextureOnMainThread, gameMap: gameState.gameMap)
                 scene.rootNode.addChildNode(fallbackPlane)
             }
         } else {
             let w = effectiveMapWorldW(cols: cols)
             let h = effectiveMapWorldH(rows: rows)
-            let planeNode = makeProceduralTerrainNode(width: w, height: h, terrainTexture: terrainTextureOnMainThread)
+            let planeNode = makeProceduralTerrainNode(width: w, height: h, terrainTexture: terrainTextureOnMainThread, gameMap: gameState.gameMap)
             scene.rootNode.addChildNode(planeNode)
         }
     }
@@ -2147,8 +2136,7 @@ struct SceneKitMapView: NSViewRepresentable {
         scene.rootNode.eulerAngles = SCNVector3Zero
 
         let loader = GameAssetLoader.shared
-        let terrainTextureOnMainThread = makeTerrainTexture(gameMap: gameState.gameMap, useWhiteBackground: false)
-        setupSceneAndTerrain(into: scene, loader: loader, terrainTexture: terrainTextureOnMainThread)
+        setupSceneAndTerrain(into: scene, loader: loader, terrainTexture: nil)
 
         let coord = context.coordinator
         container.onWillDetach = { [weak coord] in coord?.retired = true }
@@ -2761,7 +2749,7 @@ struct SceneKitMapView: NSViewRepresentable {
            let newGeo = makeTerrainGeometryWithHeights(gameMap: gameState.gameMap) {
             let numElements = newGeo.elements.count
             let oldMat = terrain.geometry?.materials.first ?? SCNMaterial()
-            applyTerrainPBRTiled(to: oldMat)
+            applyTerrainPBRTiled(to: oldMat, gameMap: gameState.gameMap)
             // Element 0 = gornja ploha (oldMat), element 1 = bočne + donja ploča (sideMat). SceneKit: materials[i] → element i.
             if numElements > 1 {
                 let sideMat = SCNMaterial()
@@ -3856,10 +3844,10 @@ struct SceneKitMapView: NSViewRepresentable {
                 }
             }
             if let gs = gameState, let seats = seatsNode {
-                syncRealmSeats(on: seats, snapshots: gs.realmSeats.copySnapshots(), rings: gs.populationRing.copySnapshots(), rows: mapRows, cols: mapCols)
+                syncRealmSeats(on: seats, snapshots: gs.realmSeats.copySnapshots(), rings: gs.populationRing.copySnapshots(), rows: mapRows, cols: mapCols, gameMap: gs.gameMap)
             }
             if let gs = gameState, let peopleNode {
-                syncPeople(on: peopleNode, snapshots: gs.people.copySnapshots(), rows: mapRows, cols: mapCols, viewUnderground: gs.isUndergroundView)
+                syncPeople(on: peopleNode, snapshots: gs.people.copySnapshots(), rows: mapRows, cols: mapCols, viewUnderground: gs.isUndergroundView, gameMap: gs.gameMap)
             }
             if let gs = gameState, let transportNode {
                 syncTransport(on: transportNode, lines: gs.transportLines, oxen: gs.oxen.copySnapshots(),

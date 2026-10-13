@@ -2,10 +2,12 @@
 //  PopulationFlow.swift
 //  Feudalism
 //
-//  Brojač dolaska i odlaska ljudi za svaku frakciju, prikazan kao prsten iznad vatre.
-//  Raste: puni se udesno (zeleno), na 360° dolazi novi seljak.
-//  Pada (sreća ispod 50 % ili ljudi više od kapaciteta): puni se ulijevo (crveno), na 360° jedna osoba ode.
-//  Mirno (puno, ili uz vatru već čeka 24 seljaka): cijeli prsten je zelen.
+//  Brojač dolaska i odlaska ljudi, na krugu oko vatre ispred dvorca.
+//  Partija (ne uređivač mape) prima 10 osoba, plus 10 za svaku kuću.
+//  Jedna osoba svakih 30 s. Sreća to ne prekida dok ima mjesta.
+//  Dok netko dolazi: krug je proziran i puni se od 0° do 360°.
+//  Kad nitko ne dolazi: cijeli krug je pun i zelen.
+//  Pada (sreća ispod 50 % kad je dvorac pun, ili ljudi više od kapaciteta): puni se ulijevo (crveno).
 //
 
 import Foundation
@@ -44,11 +46,11 @@ final class PopulationRingRuntime {
         var next: [String: PopulationRingSnapshot] = [:]
         for (id, value) in values {
             let old = rings[id]
-            let continues = old.map { $0.trend == value.trend && $0.progress <= value.progress } ?? false
+            let continues = old.map { $0.trend == value.trend && $0.progress <= value.progress + 1e-6 } ?? false
             next[id] = PopulationRingSnapshot(
                 trend: value.trend,
                 progress: value.progress,
-                previous: continues ? old!.progress : value.progress,
+                previous: continues ? old!.progress : 0,
                 changedAt: now,
                 interval: old.map { min(3, max(0.05, now - $0.changedAt)) } ?? 1,
                 radius: value.radius
@@ -72,13 +74,20 @@ final class PopulationRingRuntime {
 }
 
 extension GameState {
+    /// Polumjer kruga na samoj vatri, ne krug na kojem stoje ljudi.
+    static let hearthRingRadius = 1.08
+
     func populationTrend(of seat: RealmSeat) -> PopulationTrend {
         let present = peopleOf(faction: seat.id)
         let capacity = populationCapacity(of: seat.id)
-        if happinessPercent(of: seat.id) < HappinessRules.leaveBelow || present.count > capacity {
+        if present.count < capacity {
+            return .growing
+        }
+        let unhappy = happinessPercent(of: seat.id) < HappinessRules.leaveBelow
+        if present.count > capacity || unhappy {
             return present.contains { $0.role != .soldier } ? .shrinking : .steady
         }
-        return present.count < capacity && peasantsAtFire(of: seat.id) < Self.maxAtFire ? .growing : .steady
+        return .steady
     }
 
     /// Svaki potez pomakne brojač; puni krug = osoba dođe ili ode.
@@ -91,9 +100,10 @@ extension GameState {
             var shown: Double
             switch trend {
             case .growing:
-                progress = max(0, progress) + 1 / Double(Self.immigrationEveryTicks)
+                let step = 1 / Double(Self.immigrationEveryTicks)
+                progress = max(0, progress) + step
                 shown = progress
-                if progress >= 1 - 1e-9 {
+                if progress + 1e-6 >= 1 {
                     immigrate(seat: seat)
                     progress = 0
                     shown = 1
@@ -111,8 +121,20 @@ extension GameState {
                 shown = 0
             }
             populationProgress[seat.id] = progress
-            rings[seat.id] = (trend, min(1, shown), gatheringRadius(of: seat.id))
+            rings[seat.id] = (trend, min(1, shown), Self.hearthRingRadius)
         }
         if showsGraphics { populationRing.set(rings) }
+    }
+
+    /// Čim partija krene, krug na vatri je vidljiv: proziran dok prvih 10 još dolazi.
+    func presentOpeningPopulationRing() {
+        guard showsGraphics else { return }
+        var rings: [String: (trend: PopulationTrend, progress: Double, radius: Double)] = [:]
+        for seat in realmSeats.seats where seat.kingAlive {
+            let trend = populationTrend(of: seat)
+            let shown = trend == .growing ? (populationProgress[seat.id] ?? 0) : (trend == .steady ? 1 : 0)
+            rings[seat.id] = (trend, min(1, max(0, shown)), Self.hearthRingRadius)
+        }
+        populationRing.set(rings)
     }
 }

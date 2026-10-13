@@ -142,10 +142,13 @@ final class TransportRuntime {
         publish()
     }
 
+    var timeScale: Double = 1
+
     func startTimer() {
         guard timer == nil else { return }
         let t = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
-            self?.advance(dt: 0.05)
+            guard let self else { return }
+            self.advance(dt: 0.05 * self.timeScale)
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t

@@ -61,10 +61,14 @@ final class PeopleRuntime {
 
     // MARK: - Vrijeme
 
+    /// Množi hod. 1 = normalno, 2 i 3 ubrzavaju s trokutima na satu.
+    var timeScale: Double = 1
+
     func startTimer() {
         guard timer == nil else { return }
         let t = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
-            self?.advance(dt: 0.05)
+            guard let self else { return }
+            self.advance(dt: 0.05 * self.timeScale)
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t
@@ -83,9 +87,10 @@ final class PeopleRuntime {
             let target = PathPoint(row: people[i].targetRow, col: people[i].targetCol, layer: people[i].targetLayer)
             if people[i].pathTarget != target || people[i].pathVersion != mapVersion {
                 let start = PathPoint(row: people[i].row, col: people[i].col, layer: people[i].layer)
-                let path = findPath.map { $0(people[i], start, target) } ?? [target]
+                let routed = findPath?(people[i], start, target)
+                let path = (routed?.isEmpty == false) ? routed! : [target]
                 people[i].waypoints = path
-                people[i].pathBlocked = path == nil
+                people[i].pathBlocked = false
                 people[i].pathTarget = target
                 people[i].pathVersion = mapVersion
             }

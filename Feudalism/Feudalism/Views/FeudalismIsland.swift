@@ -166,7 +166,6 @@ struct MenuBrandIsland: View {
 
     @State private var collapseTask: Task<Void, Never>?
 
-    private let accent = Color.orange
     private let avatarSize: CGFloat = 72
 
     var body: some View {
@@ -206,7 +205,7 @@ struct MenuBrandIsland: View {
         .shadow(color: .black.opacity(0.3), radius: isExpanded ? 16 : 12, y: isExpanded ? 8 : 6)
         .fixedSize()
         .animation(menuIslandMotion, value: isExpanded)
-        .animation(.easeInOut(duration: 0.2), value: gameState.powerMode)
+        .animation(.easeInOut(duration: 0.2), value: gameState.islandPowerMode)
         .onHover { hovering in
             hoverChanged(hovering)
         }
@@ -386,23 +385,24 @@ struct MenuBrandIsland: View {
     }
 
     private var ecoButton: some View {
-        Button {
-            gameState.powerMode.toggle()
+        let mode = gameState.islandPowerMode
+        return Button {
+            gameState.cycleIslandPowerMode()
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: gameState.powerMode ? "battery.25" : "battery.100")
+                Image(systemName: mode == .eco ? "leaf.fill" : (mode == .red ? "bolt.fill" : "flame.fill"))
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(gameState.powerMode ? accent : .white.opacity(0.9))
-                Text(LocalizedStrings.string(for: "island_eco", language: gameState.appLanguage))
+                Text(mode.title)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(gameState.powerMode ? accent : .white.opacity(0.92))
+                    .lineLimit(1)
             }
-            .padding(.horizontal, 10)
+            .foregroundStyle(.black)
+            .frame(width: islandButtonWidth)
             .padding(.vertical, 7)
-            .background(Color.white.opacity(gameState.powerMode ? 0.16 : 0.08), in: Capsule())
+            .background(mode.accent, in: Capsule())
         }
         .buttonStyle(.plain)
-        .help(LocalizedStrings.string(for: "island_eco", language: gameState.appLanguage))
+        .help(mode.title)
     }
 
     private func islandButton(icon: String, titleKey: String, action: @escaping () -> Void) -> some View {
@@ -415,13 +415,30 @@ struct MenuBrandIsland: View {
                 Text(title)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(1)
             }
-            .padding(.horizontal, 10)
+            .frame(width: islandButtonWidth)
             .padding(.vertical, 7)
             .background(Color.white.opacity(0.08), in: Capsule())
         }
         .buttonStyle(.plain)
         .help(title)
+    }
+
+    /// Svi gumbi u redu imaju širinu najdužeg natpisa, uključujući Eco, Normalno i Max.
+    private var islandButtonWidth: CGFloat {
+        let titles = [
+            LocalizedStrings.string(for: "island_multiplayer", language: gameState.appLanguage),
+            LocalizedStrings.string(for: "island_training", language: gameState.appLanguage),
+            LocalizedStrings.string(for: "island_history", language: gameState.appLanguage),
+            LocalizedStrings.string(for: "island_friends", language: gameState.appLanguage),
+            IslandPowerMode.eco.title,
+            IslandPowerMode.normal.title,
+            IslandPowerMode.red.title
+        ]
+        let font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        let longest = titles.map { ($0 as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
+        return ceil(longest) + 13 + 6 + 8
     }
 }
 

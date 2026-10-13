@@ -3,9 +3,9 @@
 //  Feudalism
 //
 //  Sreća frakcije (0–100 %), ista pravila za igrača i AI lordove. Na početku je 100 %.
-//  Svakih 45 s treba otići jedna mjera hrane. Ako obrok izostane, sreća polako ide prema 0.
+//  Svakih 60 s treba otići jedna mjera hrane. Ako obrok izostane, sreća polako ide prema 0.
 //  Ako smočnice nema (nije sagrađena ili je srušena), sreća pada brzo.
-//  Ispod 50 % ljudi napuštaju dvorac (seljaci prvi, pa radnici) i novi ne dolaze.
+//  Ispod 50 %, kad je dvorac pun, ljudi napuštaju. Dok ima mjesta (10 + 10 po kući), novi i dalje dolaze.
 //  Visoka sreća je rezerva: dopušta podizanje poreza, a da ljudi ne odu.
 //
 
@@ -16,7 +16,7 @@ enum HappinessRules {
     static let start: Double = 100
     /// Ispod ovoga ljudi odlaze, a novi ne dolaze.
     static let leaveBelow: Double = 50
-    /// Kad zadnji obrok nije pojeden: toliko postotnih poena po godišnjem dobu (45 s).
+    /// Kad zadnji obrok nije pojeden: toliko postotnih poena po godišnjem dobu (60 s).
     static let stepPerMeal: Double = 10
     /// Bez smočnice: postotnih poena u sekundi. Od 100 do 0 za 50 s.
     static let stepWithoutPantry: Double = 2
@@ -60,7 +60,7 @@ extension GameState {
         return min(100, max(0, HappinessRules.start - tax))
     }
 
-    /// Brzi korak bez smočnice, inače 10 poena raspoređenih na 45 s.
+    /// Brzi korak bez smočnice, inače 10 poena raspoređenih na 60 s.
     func happinessStep(of faction: String) -> Double {
         if liveCount(Smocnica.objectId, of: faction) == 0 {
             return HappinessRules.stepWithoutPantry

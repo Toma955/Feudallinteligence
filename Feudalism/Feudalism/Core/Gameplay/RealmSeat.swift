@@ -183,10 +183,13 @@ final class RealmSeatRuntime {
         publish()
     }
 
+    var timeScale: Double = 1
+
     private func startWalk(rows: Int, cols: Int, animate: Bool) {
         guard animate else { return }
         let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
-            self?.advance(dt: 0.05, rows: rows, cols: cols)
+            guard let self else { return }
+            self.advance(dt: 0.05 * self.timeScale, rows: rows, cols: cols)
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
@@ -354,19 +357,21 @@ extension GameState {
                 cols: gameMap.cols,
                 animate: animated && showsGraphics
             )
-            spawnStartingPeople()
-            return
+        } else {
+            realmSeats.spawn(
+                from: realms,
+                groups: realmGroups,
+                rows: gameMap.rows,
+                cols: gameMap.cols,
+                playerRealmId: playerRealmId,
+                startPositions: gameMap.orderedLordStarts,
+                animate: animated && showsGraphics
+            )
         }
-        realmSeats.spawn(
-            from: realms,
-            groups: realmGroups,
-            rows: gameMap.rows,
-            cols: gameMap.cols,
-            playerRealmId: playerRealmId,
-            startPositions: gameMap.orderedLordStarts,
-            animate: animated && showsGraphics
-        )
         spawnStartingPeople()
+        if !isGamePaused, isLevelReady, !isShowingMainMenu {
+            beginMatchClock()
+        }
     }
 
     func clearRealmSeats() {

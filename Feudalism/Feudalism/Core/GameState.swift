@@ -145,6 +145,46 @@ enum SubtitleSize: String, CaseIterable, Identifiable {
     }
 }
 
+/// Island: eco štedi, normalno je trenutni plamen, crveno diže postavke na maksimum.
+enum IslandPowerMode: String, CaseIterable {
+    case eco
+    case normal
+    case red
+
+    var next: IslandPowerMode {
+        switch self {
+        case .eco: return .normal
+        case .normal: return .red
+        case .red: return .eco
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .eco: return "Eco"
+        case .normal: return "Normalno"
+        case .red: return "Max"
+        }
+    }
+
+    var accent: Color {
+        switch self {
+        case .eco: return Color(red: 0.22, green: 0.82, blue: 0.34)
+        case .normal: return .orange
+        case .red: return Color(red: 0.92, green: 0.16, blue: 0.14)
+        }
+    }
+
+    /// Pomak nijanse narančastog plamena.
+    var hueDegrees: Double {
+        switch self {
+        case .eco: return 108
+        case .normal: return 0
+        case .red: return -32
+        }
+    }
+}
+
 /// Kako se partija prikazuje. Simulacija teče u oba slučaja; grafika je samo sloj iznad.
 enum MatchPresentation: String {
     /// Mapa, animacije, kralj koji hoda.
@@ -502,6 +542,25 @@ final class GameState: ObservableObject {
     @Published var playerAvatarPath: String {
         didSet { UserDefaults.standard.set(playerAvatarPath, forKey: Self.playerAvatarPathKey) }
     }
+    /// Sekunde provedene u partijama. Postavke → Profil.
+    @Published var profilePlaySeconds: Int {
+        didSet { UserDefaults.standard.set(profilePlaySeconds, forKey: Self.profilePlaySecondsKey) }
+    }
+    /// Koliko je partija završeno povratkom u izbornik.
+    @Published var profileMatchesPlayed: Int {
+        didSet { UserDefaults.standard.set(profileMatchesPlayed, forKey: Self.profileMatchesPlayedKey) }
+    }
+    /// Koliko je građevina igrač postavio.
+    @Published var profileBuildingsPlaced: Int {
+        didSet { UserDefaults.standard.set(profileBuildingsPlaced, forKey: Self.profileBuildingsPlacedKey) }
+    }
+    private var profileStatsNoted = false
+
+    var profilePlayTimeLabel: String {
+        let hours = profilePlaySeconds / 3600
+        let minutes = (profilePlaySeconds % 3600) / 60
+        return "\(hours) h \(minutes) min"
+    }
 
     var playerDisplayName: String {
         let trimmed = playerProfileName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -542,6 +601,10 @@ final class GameState: ObservableObject {
     }
     @Published var powerMode: Bool {
         didSet { UserDefaults.standard.set(powerMode, forKey: Self.powerModeKey) }
+    }
+    /// Eco (zeleno), normalno (narančasto) ili crveno (sve postavke na maksimum).
+    @Published var islandPowerMode: IslandPowerMode {
+        didSet { UserDefaults.standard.set(islandPowerMode.rawValue, forKey: Self.islandPowerModeKey) }
     }
     @Published var fastGame: Bool {
         didSet { UserDefaults.standard.set(fastGame, forKey: Self.fastGameKey) }
@@ -646,6 +709,31 @@ final class GameState: ObservableObject {
         }
     }
 
+    /// Eco štedi, normalno ostavlja sredinu, crveno diže glasnoću, grafiku i donji bar na vrh.
+    func cycleIslandPowerMode() {
+        let next = islandPowerMode.next
+        islandPowerMode = next
+        switch next {
+        case .eco:
+            powerMode = true
+            graphicsQuality = .low
+            showFPS = false
+        case .normal:
+            powerMode = false
+            graphicsQuality = .medium
+            showFPS = false
+        case .red:
+            powerMode = false
+            graphicsQuality = .ultra
+            audioMuted = false
+            audioMusicVolume = 1
+            audioSoundsVolume = 1
+            audioSpeechVolume = 1
+            vsyncEnabled = false
+            showFPS = true
+        }
+    }
+
     func resetUserSettings() {
         appLanguage = .croatian
         showStartupAnimation = true
@@ -665,6 +753,7 @@ final class GameState: ObservableObject {
         vsyncEnabled = true
         showFPS = false
         powerMode = true
+        islandPowerMode = .eco
         gameDifficulty = .normal
         autoSaveEnabled = true
         autoSaveIntervalMinutes = 10
@@ -697,12 +786,17 @@ final class GameState: ObservableObject {
         let emblemRaw = UserDefaults.standard.string(forKey: Self.playerEmblemIdKey) ?? PlayerEmblem.shield.rawValue
         self.playerEmblemId = PlayerEmblem(rawValue: emblemRaw)?.rawValue ?? PlayerEmblem.shield.rawValue
         self.playerAvatarPath = UserDefaults.standard.string(forKey: Self.playerAvatarPathKey) ?? ""
+        self.profilePlaySeconds = UserDefaults.standard.object(forKey: Self.profilePlaySecondsKey) as? Int ?? 0
+        self.profileMatchesPlayed = UserDefaults.standard.object(forKey: Self.profileMatchesPlayedKey) as? Int ?? 0
+        self.profileBuildingsPlaced = UserDefaults.standard.object(forKey: Self.profileBuildingsPlacedKey) as? Int ?? 0
         self.showStartupAnimation = UserDefaults.standard.object(forKey: Self.showStartupAnimationKey) as? Bool ?? true
         self.showBottomBarLabels = UserDefaults.standard.object(forKey: Self.showBottomBarLabelsKey) as? Bool ?? true
         self.playPlacementSound = UserDefaults.standard.object(forKey: Self.playPlacementSoundKey) as? Bool ?? true
         self.playBarTransitionSound = UserDefaults.standard.object(forKey: Self.playBarTransitionSoundKey) as? Bool ?? true
         self.bleEnabled = UserDefaults.standard.object(forKey: Self.bleEnabledKey) as? Bool ?? false
         self.powerMode = UserDefaults.standard.object(forKey: Self.powerModeKey) as? Bool ?? true
+        let powerRaw = UserDefaults.standard.string(forKey: Self.islandPowerModeKey) ?? IslandPowerMode.eco.rawValue
+        self.islandPowerMode = IslandPowerMode(rawValue: powerRaw) ?? .eco
         self.fastGame = UserDefaults.standard.object(forKey: Self.fastGameKey) as? Bool ?? false
         self.showLogPanel = UserDefaults.standard.object(forKey: Self.showLogPanelKey) as? Bool ?? false
         let gqRaw = UserDefaults.standard.string(forKey: Self.graphicsQualityKey) ?? GraphicsQuality.medium.rawValue
@@ -740,10 +834,15 @@ final class GameState: ObservableObject {
         var economy = UserDefaults.standard.object(forKey: Self.aiEconomyFocusKey) as? Double ?? 0.5
         self.aiEconomyFocus = min(1, max(0, economy))
         var iconScale = UserDefaults.standard.object(forKey: Self.bottomBarIconScaleKey) as? Double ?? 1
-        self.bottomBarIconScale = min(1.5, max(0.75, iconScale))
         var areaScale = UserDefaults.standard.object(forKey: Self.bottomBarAreaScaleKey) as? Double ?? 1
-        self.bottomBarAreaScale = min(1.35, max(0.8, areaScale))
         var barOpacity = UserDefaults.standard.object(forKey: Self.bottomBarOpacityKey) as? Double ?? 0.88
+        if iconScale == 1.5, areaScale == 1.35, barOpacity == 1 {
+            iconScale = 1
+            areaScale = 1
+            barOpacity = 0.88
+        }
+        self.bottomBarIconScale = min(1.5, max(0.75, iconScale))
+        self.bottomBarAreaScale = min(1.35, max(0.8, areaScale))
         self.bottomBarOpacity = min(1, max(0.35, barOpacity))
         self.currentLevelName = "Level"  // učitaj Level.scn ako postoji; inače proceduralni teren
         self.resourcesCancellable = res.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
@@ -771,22 +870,40 @@ final class GameState: ObservableObject {
         guard isSoloMode else { return }
         var camera = mapCameraSettings
         camera.panOffset = .zero
-        camera.setZoomPhase(2)
+        camera.setZoomPhase(1)
         mapCameraSettings = camera
     }
 
-    /// Grafika: 1 korak u sekundi. Simulator: 10 koraka u sekundi, bez crtanja.
-    var matchTicksPerSecond: Double { showsGraphics ? 1 : 10 }
+    /// Grafika: 1, 2 ili 3 koraka u sekundi. Simulator: 10 koraka u sekundi, bez crtanja.
+    var matchTicksPerSecond: Double { showsGraphics ? Double(min(3, max(1, gameSpeed))) : 10 }
+
+    /// 1 = normalno, 2 = dvostruko, 3 = trostruko. Mijenja se trokutima na satu.
+    @Published var gameSpeed: Int = 1
+
+    func setGameSpeed(_ speed: Int) {
+        let next = min(3, max(1, speed))
+        gameSpeed = next
+        let scale = Double(next)
+        people.timeScale = scale
+        oxen.timeScale = scale
+        realmSeats.timeScale = scale
+        guard matchClock != nil else { return }
+        startMatchTimer()
+    }
 
     func beginMatchClock() {
+        startMatchTimer()
+        MatchHistoryStore.shared.beginRecording(from: self)
+    }
+
+    private func startMatchTimer() {
         matchClock?.invalidate()
-        let interval = 1.0 / matchTicksPerSecond
+        let interval = 1.0 / max(0.25, matchTicksPerSecond)
         let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             self?.stepMatch()
         }
         RunLoop.main.add(timer, forMode: .common)
         matchClock = timer
-        MatchHistoryStore.shared.beginRecording(from: self)
     }
 
     func endMatchClock() {
@@ -826,7 +943,7 @@ final class GameState: ObservableObject {
         checkCampaignVictory()
         maybeAutoSave()
         MatchHistoryStore.shared.recordTick(from: self)
-        if hasWinner || activeRealms.isEmpty {
+        if activeRealms.isEmpty || (!isSoloMode && !isSandboxPlay && hasWinner) {
             endMatchClock()
             MatchHistoryStore.shared.finishRecording(from: self)
         }
@@ -937,6 +1054,7 @@ final class GameState: ObservableObject {
 
     /// Prikaži glavni izbornik (nazad iz igre).
     func showMainMenu() {
+        noteProfileMatch()
         NotificationCenter.default.post(name: .feudalismStopMapScene, object: nil)
         MatchHistoryStore.shared.finishRecording(from: self)
         isGamePaused = false
@@ -945,6 +1063,14 @@ final class GameState: ObservableObject {
         clearRealmSeats()
         isShowingMainMenu = true
         isSandboxPlay = false
+    }
+
+    /// Jednom po partiji zapiše sate i broj partija na profil.
+    private func noteProfileMatch() {
+        guard !isMapEditorMode, !isShowingMainMenu, !profileStatsNoted, currentTurn > 1 else { return }
+        profilePlaySeconds += max(0, currentTurn - 1)
+        profileMatchesPlayed += 1
+        profileStatsNoted = true
     }
 
     /// Ista partija ispočetka: prazna mapa, resursi na početak, kralj opet u sredini.
@@ -978,6 +1104,10 @@ final class GameState: ObservableObject {
         oxen.reset()
         matchLog = []
         lastAutoSaveTurn = 0
+        gameSpeed = 1
+        people.timeScale = 1
+        oxen.timeScale = 1
+        realmSeats.timeScale = 1
         if isSoloMode {
             resources.resetForNewSoloGame()
         }
@@ -1248,6 +1378,7 @@ final class GameState: ObservableObject {
         clearRealmSeats()
         isLevelReady = false
         isShowingMainMenu = false
+        profileStatsNoted = false
         if showsGraphics {
             levelLoadingMessage = "Učitavanje mape (\(gameMap.displayDimensionString))…"
             if isSoloMode { focusSoloCameraOnCenter() }
@@ -1336,6 +1467,7 @@ final class GameState: ObservableObject {
             food = max(0, initialFood)
             hop = max(0, initialHop)
             hay = max(0, initialHay)
+            grantSandboxOpening()
         }
     }
 
@@ -1365,6 +1497,7 @@ final class GameState: ObservableObject {
         food = max(0, initialFood)
         hop = max(0, initialHop)
         hay = max(0, initialHay)
+        grantSandboxOpening()
     }
 
     /// Solo graditelj: kreni s već pripremljenom mapom (učitanom u izborniku).
@@ -1400,6 +1533,15 @@ final class GameState: ObservableObject {
         food = max(0, initialFood)
         hop = max(0, initialHop)
         hay = max(0, initialHay)
+        grantSandboxOpening()
+    }
+
+    /// Solo graditelj dobiva 100 zlatnika i 100 jabuka. Zlato HUD broji od nule.
+    private func grantSandboxOpening() {
+        guard isSandboxPlay else { return }
+        let missingGold = max(0, 100 - resources.gold)
+        if missingGold > 0 { resources.add(gold: missingGold) }
+        addGood(.apple, 100)
     }
 
     /// Spremi trenutnu mapu (teren, visine, građevine) u odabranu datoteku.
@@ -1549,6 +1691,7 @@ extension GameState {
         if !isMapEditorMode {
             let name = ObjectCatalog.shared.object(id: objectId)?.name ?? objectId
             MatchHistoryStore.shared.noteBuild(from: self, name: name, row: row, col: col)
+            profileBuildingsPlaced += 1
         }
         return true
     }
@@ -1893,6 +2036,11 @@ enum PadBrush: String, CaseIterable, Identifiable {
     case plodna = "Zelena zemlja"
     case kamen = "Kamena ruda"
     case zeljezo = "Željezna ruda"
+    case rijeka = "Rijeka"
+    case more = "More"
+    case pijesak = "Pijesak"
+    case obicno = "Obično tlo"
+    case mocvara = "Močvara"
     case obrisi = "Obriši"
 
     var id: String { rawValue }
@@ -2028,9 +2176,25 @@ extension GameState {
             case .zeljezo:
                 gameMap.setSurface(at: coord, .zeljezo)
                 gameMap.setDeposit(at: coord, .iron)
+            case .rijeka:
+                gameMap.setSurface(at: coord, .voda)
+                gameMap.setDeposit(at: coord, nil)
+            case .more:
+                gameMap.setSurface(at: coord, .more)
+                gameMap.setDeposit(at: coord, nil)
+            case .pijesak:
+                gameMap.setSurface(at: coord, .pustinja)
+                gameMap.setDeposit(at: coord, nil)
+            case .obicno:
+                gameMap.setSurface(at: coord, .tlo)
+                gameMap.setDeposit(at: coord, nil)
+            case .mocvara:
+                gameMap.setSurface(at: coord, .mocvara)
+                gameMap.setDeposit(at: coord, nil)
             case .obrisi:
                 gameMap.setDeposit(at: coord, nil)
-                if let surface = gameMap.cell(row: coord.row, col: coord.col)?.povrsina, surface == .plodna || surface == .zeljezo {
+                if let surface = gameMap.cell(row: coord.row, col: coord.col)?.povrsina,
+                   surface == .plodna || surface == .zeljezo || surface == .more || surface == .voda || surface == .pustinja || surface == .mocvara {
                     gameMap.setSurface(at: coord, .tlo)
                 }
             }
@@ -2208,6 +2372,9 @@ private extension GameState {
     static let playerProfileNameKey = "Feudalism.playerProfileName"
     static let playerEmblemIdKey = "Feudalism.playerEmblemId"
     static let playerAvatarPathKey = "Feudalism.playerAvatarPath"
+    static let profilePlaySecondsKey = "Feudalism.profilePlaySeconds"
+    static let profileMatchesPlayedKey = "Feudalism.profileMatchesPlayed"
+    static let profileBuildingsPlacedKey = "Feudalism.profileBuildingsPlaced"
     static let showStartupAnimationKey = "Feudalism.showStartupAnimation"
     static let showBottomBarLabelsKey = "Feudalism.showBottomBarLabels"
     static let playPlacementSoundKey = "Feudalism.playPlacementSound"
@@ -2217,6 +2384,7 @@ private extension GameState {
     static let audioSpeechVolumeKey = "Feudalism.audioSpeechVolume"
     static let bleEnabledKey = "Feudalism.bleEnabled"
     static let powerModeKey = "Feudalism.powerMode"
+    static let islandPowerModeKey = "Feudalism.islandPowerMode"
     static let fastGameKey = "Feudalism.fastGame"
     static let showLogPanelKey = "Feudalism.showLogPanel"
     static let graphicsQualityKey = "Feudalism.graphicsQuality"

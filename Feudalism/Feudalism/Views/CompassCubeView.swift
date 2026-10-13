@@ -10,6 +10,7 @@ import AppKit
 import QuartzCore
 
 private let cardinals = ["N", "E", "S", "W"]
+let compassCardinals = cardinals
 
 /// Ease-in-out: lagano krene, ubrza u sredini, elegantno uspori pri kraju (cubic).
 private func easeInOutCubic(_ t: CGFloat) -> CGFloat {
@@ -23,7 +24,7 @@ private func easeInOutCubic(_ t: CGFloat) -> CGFloat {
 }
 
 /// Indeks 0–3 iz mapRotation (0=N, π/2=E, π=S, 3π/2=W).
-private func cardinalIndex(from rotation: CGFloat) -> Int {
+func compassCardinalIndex(from rotation: CGFloat) -> Int {
     let twoPi = 2 * CGFloat.pi
     var r = rotation
     while r < 0 { r += twoPi }
@@ -36,6 +37,9 @@ private func cardinalIndex(from rotation: CGFloat) -> Int {
 struct CompassCubeView: View {
     @Binding var mapRotation: CGFloat
     @Binding var panOffset: CGPoint
+    /// Kad je postavljeno, dvoklik otvara padajući izbornik. Jedan klik i dalje okreće kameru.
+    var onPress: (() -> Void)? = nil
+    @State private var clickWait: DispatchWorkItem?
     @StateObject private var displayState = CompassDisplayState()
     @State private var isAnimating = false
     /// Klikovi tijekom animacije → još toliko rotacija nakon trenutnog koraka.
@@ -52,12 +56,12 @@ struct CompassCubeView: View {
         if let overrideIdx = displayState.overrideIndex {
             return cardinals[overrideIdx]
         }
-        return cardinals[cardinalIndex(from: mapRotation)]
+        return cardinals[compassCardinalIndex(from: mapRotation)]
     }
 
     /// Jedna rotacija 90°. Kad gotovo: ako ima queued ili remaining, odmah sljedeća; inače kraj.
     private func performOneRotation(remainingSteps: Int, onAllComplete: @escaping () -> Void) {
-        let currentIdx = cardinalIndex(from: mapRotation)
+        let currentIdx = compassCardinalIndex(from: mapRotation)
         let nextIdx = (currentIdx + 1) % 4
         withAnimation(.easeInOut(duration: animDuration)) {
             displayState.overrideIndex = nextIdx
@@ -94,15 +98,36 @@ struct CompassCubeView: View {
         RunLoop.main.add(timer, forMode: .common)
     }
 
+    private func rotateOneStep() {
+        if isAnimating {
+            queuedExtraRotations = min(queuedExtraRotations + 1, 3)
+        } else {
+            isAnimating = true
+            performOneRotation(remainingSteps: 1, onAllComplete: { isAnimating = false })
+        }
+    }
+
+    private func handlePress() {
+        guard onPress != nil else {
+            rotateOneStep()
+            return
+        }
+        if let clickWait {
+            clickWait.cancel()
+            self.clickWait = nil
+            onPress?()
+            return
+        }
+        let work = DispatchWorkItem { [self] in
+            clickWait = nil
+            rotateOneStep()
+        }
+        clickWait = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.26, execute: work)
+    }
+
     var body: some View {
-        Button {
-            if isAnimating {
-                queuedExtraRotations = min(queuedExtraRotations + 1, 3)
-            } else {
-                isAnimating = true
-                performOneRotation(remainingSteps: 1, onAllComplete: { isAnimating = false })
-            }
-        } label: {
+        Button(action: handlePress) {
             Text(currentLetter)
                 .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(
@@ -132,6 +157,41 @@ struct CompassCubeView: View {
         .clipped()
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
         .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: cornerRadius))
+    }
+}
+
+/// Glatko okrene kameru na stranu svijeta 0=N, 1=E, 2=S, 3=W.
+func spinCamera(toCardinal index: Int, from rotation: CGFloat, apply: @escaping (CGFloat) -> Void) {
+    CameraSpin.shared.go(to: index, from: rotation, apply: apply)
+}
+
+private final class CameraSpin {
+    static let shared = CameraSpin()
+    private var timer: Timer?
+
+    func go(to index: Int, from rotation: CGFloat, apply: @escaping (CGFloat) -> Void) {
+        timer?.invalidate()
+        let twoPi = 2 * CGFloat.pi
+        var start = rotation
+        while start < 0 { start += twoPi }
+        start = start.truncatingRemainder(dividingBy: twoPi)
+        let targetBase = CGFloat(index) * .pi / 2
+        var delta = targetBase - start
+        while delta <= -.pi { delta += twoPi }
+        while delta > .pi { delta -= twoPi }
+        let target = start + delta
+        let startTime = CACurrentMediaTime()
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { t in
+            let p = min(1, CGFloat((CACurrentMediaTime() - startTime) / 0.35))
+            let eased = easeInOutCubic(p)
+            var value = start + (target - start) * eased
+            while value < 0 { value += twoPi }
+            if value >= twoPi { value = value.truncatingRemainder(dividingBy: twoPi) }
+            apply(value)
+            if p >= 1 { t.invalidate() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
 }
 

@@ -81,7 +81,8 @@ final class GameAssetLoader: ObservableObject {
         }
 
         async let terrainTexture: Any? = Task.detached {
-            SceneKitMapView.createTerrainTextureForPreload()
+            EarthTiles.prepare()
+            return SceneKitMapView.createTerrainTextureForPreload()
         }.value
         async let level: LoadedLevel? = Task.detached {
             if !UserDefaults.standard.bool(forKey: "Feudalism.didDeleteStaleSoloLevelForTextureFix") {
@@ -92,7 +93,7 @@ final class GameAssetLoader: ObservableObject {
         }.value
 
         let terrain = await terrainTexture
-        await tick("Teren")
+            await tick("Teren i zemlja")
         let loadedLevel = await level
         await tick("Mapa")
 

@@ -41,7 +41,7 @@ enum Underground {
         root.opacity = 0
 
         let floor = SCNBox(width: mapWidth, height: 0.2, length: mapLength, chamferRadius: 0)
-        floor.materials = [rockMaterial(width: mapWidth, length: mapLength, tint: 1)]
+        floor.materials = [undergroundSoilMaterial()]
         let floorNode = SCNNode(geometry: floor)
         floorNode.name = "undergroundFloor"
         floorNode.position = SCNVector3(0, -0.1, 0)
@@ -145,6 +145,18 @@ enum Underground {
         gradient?.draw(in: NSBezierPath(ovalIn: NSRect(x: 0, y: 0, width: side, height: side)), relativeCenterPosition: .zero)
         image.unlockFocus()
         return image
+    }
+
+    private static func undergroundSoilMaterial() -> SCNMaterial {
+        let mat = SCNMaterial()
+        mat.diffuse.contents = EarthTiles.undergroundFloorImage()
+        mat.diffuse.wrapS = .repeat
+        mat.diffuse.wrapT = .repeat
+        mat.diffuse.mipFilter = .linear
+        mat.lightingModel = .blinn
+        mat.locksAmbientWithDiffuse = true
+        mat.isDoubleSided = true
+        return mat
     }
 
     private static func rockMaterial(width: CGFloat, length: CGFloat, tint: CGFloat) -> SCNMaterial {

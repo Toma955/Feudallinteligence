@@ -36,6 +36,10 @@ final class AILordProfileStore: ObservableObject {
         if profiles.isEmpty {
             installDefaultRoster()
         }
+        if notebook.peoplePerHouse <= 0 {
+            notebook.peoplePerHouse = GameState.peoplePerHouse
+        }
+        save()
         loadWeights()
     }
 

@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-private enum AboutGoodsKind: String, CaseIterable, Identifiable {
+enum AboutGoodsKind: String, CaseIterable, Identifiable {
     case resources
     case food
     case weapons
@@ -49,31 +49,17 @@ private enum AboutSection: String, CaseIterable, Identifiable {
     }
 }
 
-struct AboutView: View {
-    @EnvironmentObject private var gameState: GameState
-    @Binding var isPresented: Bool
-    @Binding var showHowTo: Bool
-    var infoTick: Int
-    @State private var category: ObjectCategory = .farme
-    @State private var goodsKind: AboutGoodsKind = .resources
-    @State private var showSoldiers = false
+/// Zajedničko stanje About zaslona i donjeg islanda.
+final class AboutBrowser: ObservableObject {
+    static let shared = AboutBrowser()
 
-    private var language: AppLanguage { gameState.appLanguage }
+    @Published var category: ObjectCategory = .farme
+    @Published var goodsKind: AboutGoodsKind = .resources
+    @Published var showSoldiers = false
 
     private static let peopleCategories: Set<ObjectCategory> = [.vojnici, .radnici]
 
-    private var appVersion: String {
-        let info = Bundle.main.infoDictionary
-        let version = info?["CFBundleShortVersionString"] as? String ?? "1.0"
-        let build = info?["CFBundleVersion"] as? String
-        if let build, !build.isEmpty, build != version {
-            return "\(version) (\(build))"
-        }
-        return version
-    }
-
-    /// Sve građevine iz kataloga (bez ljudi) plus placeable tipovi koji možda nisu u katalogu.
-    private var catalogBuildings: [GameObject] {
+    var catalogBuildings: [GameObject] {
         var seen = Set<String>()
         var list: [GameObject] = []
         for cat in ObjectCategory.allCases where !Self.peopleCategories.contains(cat) {
@@ -92,14 +78,39 @@ struct AboutView: View {
         return list
     }
 
-    private var visibleCategories: [ObjectCategory] {
-        ObjectCategory.allCases.filter { cat in
-            !Self.peopleCategories.contains(cat) && catalogBuildings.contains { $0.category == cat }
+    var buildCategories: [ObjectCategory] {
+        let buildings = catalogBuildings
+        return ObjectCategory.allCases.filter { cat in
+            !Self.peopleCategories.contains(cat) && buildings.contains { $0.category == cat }
         }
     }
+}
+
+struct AboutView: View {
+    @EnvironmentObject private var gameState: GameState
+    @Binding var isPresented: Bool
+    @Binding var showHowTo: Bool
+    var infoTick: Int
+    @ObservedObject private var browser = AboutBrowser.shared
+
+    private var language: AppLanguage { gameState.appLanguage }
+
+    private var catalogBuildings: [GameObject] { browser.catalogBuildings }
+
+    private var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let build = info?["CFBundleVersion"] as? String
+        if let build, !build.isEmpty, build != version {
+            return "\(version) (\(build))"
+        }
+        return version
+    }
+
+    private var visibleCategories: [ObjectCategory] { browser.buildCategories }
 
     private var buildingsInCategory: [GameObject] {
-        let chosen = visibleCategories.contains(category) ? category : (visibleCategories.first ?? .farme)
+        let chosen = visibleCategories.contains(browser.category) ? browser.category : (visibleCategories.first ?? .farme)
         return catalogBuildings.filter { $0.category == chosen }
     }
 
@@ -108,11 +119,7 @@ struct AboutView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            menuBackHeader(titleKey: "menu_about", language: language) {
-                isPresented = false
-            }
-
+        Group {
             if showHowTo {
                 howToPlay
             } else {
@@ -126,31 +133,23 @@ struct AboutView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     sectionBlock(AboutSection.pads.title(language)) {
-                        ForEach(pads) { pad in
-                            padCard(pad)
+                        ForEach(Array(pads.enumerated()), id: \.element.id) { index, pad in
+                            padCard(pad, slot: index)
                         }
                     }
                     itemsBlock
                     VStack(alignment: .leading, spacing: 10) {
-                        Text(AboutSection.buildings.title(language))
+                        Text(browser.showSoldiers ? AboutSection.soldiers.title(language) : AboutSection.buildings.title(language))
                             .font(.custom("Georgia", size: 20))
                             .foregroundStyle(.white.opacity(0.95))
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(visibleCategories) { cat in
-                                    categoryButton(cat)
-                                }
-                                soldiersButton
-                            }
-                        }
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 14)], spacing: 14) {
-                            if showSoldiers {
-                                ForEach(SoldierType.allCases) { type in
-                                    soldierCard(type)
+                            if browser.showSoldiers {
+                                ForEach(Array(SoldierType.allCases.enumerated()), id: \.element.id) { index, type in
+                                    soldierCard(type, slot: index)
                                 }
                             } else {
-                                ForEach(buildingsInCategory, id: \.id) { object in
-                                    buildingCard(object)
+                                ForEach(Array(buildingsInCategory.enumerated()), id: \.element.id) { index, object in
+                                    buildingCard(object, slot: index)
                                 }
                             }
                         }
@@ -208,16 +207,9 @@ struct AboutView: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.yellow.opacity(0.95))
                 .fixedSize(horizontal: false, vertical: true)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(AboutGoodsKind.allCases) { kind in
-                        goodsButton(kind)
-                    }
-                }
-            }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 14)], spacing: 14) {
-                ForEach(goodsKind.items) { item in
-                    goodCard(item)
+                ForEach(Array(browser.goodsKind.items.enumerated()), id: \.element.id) { index, item in
+                    goodCard(item, slot: index)
                 }
             }
         }
@@ -230,24 +222,9 @@ struct AboutView: View {
         )
     }
 
-    private func goodsButton(_ kind: AboutGoodsKind) -> some View {
-        let selected = goodsKind == kind
-        return Button {
-            goodsKind = kind
-        } label: {
-            Text(kind.title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(selected ? .yellow : .white.opacity(0.88))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(selected ? Color.white.opacity(0.2) : Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func goodCard(_ kind: AboutGoodKind) -> some View {
+    private func goodCard(_ kind: AboutGoodKind, slot: Int) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            GoodPreviewView(kind: kind)
+            GoodPreviewView(kind: kind, slot: slot)
                 .frame(height: 150)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             Text(kind.title)
@@ -256,36 +233,6 @@ struct AboutView: View {
         }
         .padding(10)
         .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
-    }
-
-    private func categoryButton(_ cat: ObjectCategory) -> some View {
-        let selected = !showSoldiers && (visibleCategories.contains(category) ? category == cat : cat == visibleCategories.first)
-        return Button {
-            showSoldiers = false
-            category = cat
-        } label: {
-            Text(cat.rawValue)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(selected ? .yellow : .white.opacity(0.88))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(selected ? Color.white.opacity(0.2) : Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var soldiersButton: some View {
-        Button {
-            showSoldiers = true
-        } label: {
-            Text(AboutSection.soldiers.title(language))
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(showSoldiers ? .yellow : .white.opacity(0.88))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(showSoldiers ? Color.white.opacity(0.2) : Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-        }
-        .buttonStyle(.plain)
     }
 
     private func sectionBlock<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -299,9 +246,9 @@ struct AboutView: View {
         }
     }
 
-    private func padCard(_ pad: PadBrush) -> some View {
+    private func padCard(_ pad: PadBrush, slot: Int) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            PadPreviewView(pad: pad)
+            PadPreviewView(pad: pad, slot: slot)
                 .frame(height: 150)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             Text(pad.rawValue)
@@ -316,9 +263,9 @@ struct AboutView: View {
         .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
     }
 
-    private func buildingCard(_ object: GameObject) -> some View {
+    private func buildingCard(_ object: GameObject, slot: Int) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            ObjectPreviewView(objectId: object.id)
+            ObjectPreviewView(objectId: object.id, slot: slot)
                 .frame(height: 150)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             Text(object.name)
@@ -334,10 +281,10 @@ struct AboutView: View {
         .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
     }
 
-    private func soldierCard(_ type: SoldierType) -> some View {
+    private func soldierCard(_ type: SoldierType, slot: Int) -> some View {
         let health = LocalizedStrings.string(for: "about_soldier_health", language: language)
         return VStack(alignment: .leading, spacing: 8) {
-            SoldierPreviewView(type: type)
+            SoldierPreviewView(type: type, slot: slot)
                 .frame(height: 170)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             Text(type.displayName)
@@ -366,6 +313,16 @@ struct AboutView: View {
             return LocalizedStrings.string(for: "about_pad_kamen", language: language)
         case .zeljezo:
             return LocalizedStrings.string(for: "about_pad_zeljezo", language: language)
+        case .rijeka:
+            return LocalizedStrings.string(for: "about_pad_rijeka", language: language)
+        case .more:
+            return LocalizedStrings.string(for: "about_pad_more", language: language)
+        case .pijesak:
+            return LocalizedStrings.string(for: "about_pad_pijesak", language: language)
+        case .obicno:
+            return LocalizedStrings.string(for: "about_pad_tlo", language: language)
+        case .mocvara:
+            return LocalizedStrings.string(for: "about_pad_mocvara", language: language)
         case .obrisi:
             return ""
         }

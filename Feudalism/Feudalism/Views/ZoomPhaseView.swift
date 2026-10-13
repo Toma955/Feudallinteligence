@@ -25,7 +25,7 @@ private func loadForestIcon() -> NSImage? {
 }
 
 /// Ikona: 1 = 3 šume (2× max zoom out), 2 = tri stabla (8×), 3 = jedno stablo (14×).
-private struct ZoomPhaseIcon: View {
+struct ZoomPhaseIcon: View {
     let phase: Int
     private static let forestImage = loadForestIcon()
 
@@ -74,6 +74,9 @@ private struct ZoomPhaseIcon: View {
 /// Gumb zooma: prikazuje trenutnu fazu (3 šume / 3 stabla / 1 stablo). Klik = sljedeća faza. Sužen element.
 struct ZoomPhaseView: View {
     @Binding var mapCameraSettings: MapCameraSettings
+    /// Kad je postavljeno, dvoklik otvara tri prikaza. Jedan klik i dalje mijenja zoom.
+    var onPress: (() -> Void)? = nil
+    @State private var clickWait: DispatchWorkItem?
 
     private let viewWidth: CGFloat = 120
     private let height: CGFloat = 28
@@ -83,12 +86,33 @@ struct ZoomPhaseView: View {
         min(3, max(1, mapCameraSettings.zoomPhase))
     }
 
+    private func stepZoom() {
+        var s = mapCameraSettings
+        s.stepZoomPhaseByClick()
+        mapCameraSettings = s
+    }
+
+    private func handlePress() {
+        guard onPress != nil else {
+            stepZoom()
+            return
+        }
+        if let clickWait {
+            clickWait.cancel()
+            self.clickWait = nil
+            onPress?()
+            return
+        }
+        let work = DispatchWorkItem {
+            clickWait = nil
+            stepZoom()
+        }
+        clickWait = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.26, execute: work)
+    }
+
     var body: some View {
-        Button {
-            var s = mapCameraSettings
-            s.stepZoomPhaseByClick()
-            mapCameraSettings = s
-        } label: {
+        Button(action: handlePress) {
             ZoomPhaseIcon(phase: currentPhase)
                 .id(currentPhase)
                 .frame(width: viewWidth, height: height)

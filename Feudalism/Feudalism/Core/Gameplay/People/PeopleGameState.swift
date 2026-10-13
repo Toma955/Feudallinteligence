@@ -18,7 +18,7 @@ extension GameState {
     static let firePersonSpacing = 0.95
     /// Najmanji krug – da i prvih par ljudi ima mjesta.
     static let fireMinSlots = 8
-    /// Jedan novi seljak svakih 30 poteza. 1 potez = 1 s, dakle dvije osobe u minuti.
+    /// Jedan novi seljak svakih 30 poteza. 1 potez = 1 s.
     static let immigrationEveryTicks = 30
 
     var playerSeat: RealmSeat? {
@@ -114,6 +114,7 @@ extension GameState {
         resetRelations()
         populationProgress = [:]
         populationRing.reset()
+        presentOpeningPopulationRing()
         bindMatchRuntimes()
         if showsGraphics, !isGamePaused {
             people.startTimer()
@@ -171,9 +172,15 @@ extension GameState {
         refreshPeopleCount()
     }
 
-    /// Koliko ljudi frakcija može imati: dvorac + 10 po kući koju posjeduje.
+    /// Koliko ljudi jedna kuća dodaje. Broj piše u bilježnici AI lordova.
+    var peopleAddedPerHouse: Int {
+        let written = AILordProfileStore.shared.notebook.peoplePerHouse
+        return written > 0 ? written : Self.peoplePerHouse
+    }
+
+    /// Koliko ljudi frakcija može imati: dvorac + zapis iz bilježnice po kući.
     func populationCapacity(of faction: String) -> Int {
-        Self.baseCapacity + liveCount(House.objectId, of: faction) * Self.peoplePerHouse
+        Self.baseCapacity + liveCount(House.objectId, of: faction) * peopleAddedPerHouse
     }
 
     func peasantsAtFire(of faction: String) -> Int {

@@ -48,12 +48,14 @@ struct MainMenuView: View {
     @State private var soloImportTick = 0
     @State private var aboutShowHowTo = false
     @State private var aboutInfoTick = 0
+    @State private var aboutDockIn = false
     @ObservedObject private var playback = RecordingPlayback.shared
     @ObservedObject private var trainingSession = TrainingSession.shared
+    @ObservedObject private var aboutBrowser = AboutBrowser.shared
 
     var body: some View {
         ZStack {
-            FireBackgroundView()
+            FireBackgroundView(hueDegrees: gameState.islandPowerMode.hueDegrees)
 
             // Središnji element – centriran na ekranu (Solo, Nova igra, …)
             VStack(spacing: 0) {
@@ -131,9 +133,9 @@ struct MainMenuView: View {
             .animation(.easeInOut(duration: menuPostavkeTransitionDuration), value: islandPage)
             .padding(.horizontal, isHomeDock ? 24 : 48)
             .padding(.top, isHomeDock ? 88 : 48)
-            .padding(.bottom, islandPage == .history || islandPage == .training ? 100 : (showSoloSetup ? 0 : (isHomeDock ? 36 : 48)))
+            .padding(.bottom, islandPage == .history || islandPage == .training ? 100 : (showAbout ? 118 : (showSoloSetup ? 0 : (isHomeDock ? 36 : 48))))
 
-            if !hideTitle, islandPage != .history, islandPage != .training {
+            if !hideTitle, islandPage != .history, islandPage != .training, !showAbout {
                 if islandExpanded {
                     Color.clear
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -176,6 +178,13 @@ struct MainMenuView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                     .padding(.bottom, 22)
             }
+            if !hideTitle, showAbout {
+                aboutDock
+                    .offset(y: aboutDockIn ? 0 : 300)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 28)
+                    .allowsHitTesting(aboutDockIn)
+            }
         }
         .sheet(isPresented: $showGameSetup) {
             GameSetupView()
@@ -188,9 +197,15 @@ struct MainMenuView: View {
             }
         }
         .onChange(of: showAbout) { open in
-            if !open {
+            if open {
+                aboutDockIn = false
+                DispatchQueue.main.async {
+                    withAnimation(.easeOut(duration: 0.48)) { aboutDockIn = true }
+                }
+            } else {
                 aboutShowHowTo = false
                 islandExpanded = false
+                aboutDockIn = false
             }
         }
     }
@@ -325,6 +340,13 @@ struct MainMenuView: View {
                 AITrainingView()
                     .environmentObject(gameState)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if islandPage == .multiplayer {
+                MultiplayerSetupView()
+                    .environmentObject(gameState)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if islandPage == .friends {
+                FriendsView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 Spacer(minLength: 8)
                 Image(systemName: islandPage.icon)
@@ -385,6 +407,43 @@ struct MainMenuView: View {
             .background(on ? Color.yellow : Color.white.opacity(0.1), in: Capsule())
         }
         .buttonStyle(.plain)
+    }
+
+    private var aboutDock: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                recordingButton("Natrag", "chevron.backward", on: false) {
+                    withAnimation(.easeInOut(duration: menuPostavkeTransitionDuration)) { showAbout = false }
+                }
+                ForEach(AboutGoodsKind.allCases) { kind in
+                    recordingButton(kind.title, aboutGoodsIcon(kind), on: aboutBrowser.goodsKind == kind) {
+                        aboutBrowser.goodsKind = kind
+                    }
+                }
+                ForEach(aboutBrowser.buildCategories) { cat in
+                    recordingButton(cat.rawValue, "building.2.fill", on: !aboutBrowser.showSoldiers && aboutBrowser.category == cat) {
+                        aboutBrowser.showSoldiers = false
+                        aboutBrowser.category = cat
+                    }
+                }
+                recordingButton("Vojnici", "shield.fill", on: aboutBrowser.showSoldiers) {
+                    aboutBrowser.showSoldiers = true
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+        }
+        .frame(maxWidth: 1120)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.22), lineWidth: 1))
+    }
+
+    private func aboutGoodsIcon(_ kind: AboutGoodsKind) -> String {
+        switch kind {
+        case .resources: return "shippingbox.fill"
+        case .food: return "fork.knife"
+        case .weapons: return "shield.lefthalf.filled"
+        }
     }
 
     private var recordingDock: some View {
@@ -517,7 +576,7 @@ struct MainMenuView: View {
         if showAbout { return 1500 }
         if islandPage == .history { return 1760 }
         if islandPage == .saves { return historyPanelWidth }
-        if islandPage == .training { return historyPanelWidth }
+        if islandPage == .training || islandPage == .multiplayer || islandPage == .friends { return historyPanelWidth }
         if islandPage != .none { return 720 }
         if showMapEditorChoice || showCampaign { return 980 }
         return menuPanelMaxWidth
@@ -532,7 +591,7 @@ struct MainMenuView: View {
         if showMapEditorChoice { return 520 }
         if islandPage == .history { return 980 }
         if islandPage == .saves { return historyPanelHeight }
-        if islandPage == .training { return historyPanelHeight }
+        if islandPage == .training || islandPage == .multiplayer || islandPage == .friends { return historyPanelHeight }
         if islandPage != .none { return 360 }
         return menuPanelMaxHeight
     }

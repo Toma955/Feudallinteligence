@@ -65,7 +65,7 @@ final class GameMap: ObservableObject {
         return h
     }
 
-    /// Pri generiranju mape sve ćelije su G (poluplodna zemlja), indeks kretanja 1.
+    /// Pri generiranju mape sve ćelije su gola zemlja.
     /// Poziva se na pozadinskom threadu pri kreiranju mape.
     static func makeGrid(rows: Int, cols: Int) -> [String: MapCell] {
         var result: [String: MapCell] = [:]

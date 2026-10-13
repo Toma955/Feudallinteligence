@@ -16,8 +16,8 @@ enum Season: String, CaseIterable, Codable {
     /// Redoslijed u godini; partija počinje zimom.
     static let cycle: [Season] = [.winter, .spring, .summer, .autumn]
 
-    /// Poteza po godišnjem dobu. 1 potez = 1 s, dakle 45 s po dobu i 180 s po godini.
-    static let turnsPerSeason = 45
+    /// Poteza po godišnjem dobu. 1 potez = 1 s, dakle 60 s po dobu i 240 s po godini.
+    static let turnsPerSeason = 60
 
     static func at(turn: Int) -> (season: Season, yearOffset: Int) {
         let elapsed = max(0, turn - 1)

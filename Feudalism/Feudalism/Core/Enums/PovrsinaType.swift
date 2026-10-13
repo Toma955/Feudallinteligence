@@ -4,7 +4,6 @@
 //
 //  Teren jedne ćelije, broj 0…7.
 //  Trava je tekstura na običnom tlu. Put nije površina.
-//  Stare mape sa slovima (D, G, F, T, W, M, R, S, B) se i dalje učitavaju.
 //
 
 import Foundation

@@ -38,7 +38,7 @@ struct AILordRulebook: Codable, Equatable {
         /// "armory" / "pantry" / "warehouse" / nil.
         let storageKind: String?
         let storageCapacity: Int
-        /// Koliko novih ljudi građevina omogućuje.
+        /// Koliko novih ljudi građevina omogućuje. Za kuću je to `peoplePerHouse` iz bilježnice.
         let housing: Int
         /// Naslaga koju građevina traži: "iron" / "stone" / nil.
         let requiredDeposit: String?
@@ -141,6 +141,7 @@ struct AILordRulebook: Codable, Equatable {
     struct PopulationRules: Codable, Equatable {
         let baseCapacity: Int
         let maxAtFire: Int
+        /// Isti broj koji je zapisan u bilježnici (`AILordNotebook.peoplePerHouse`).
         let peoplePerHouse: Int
         let immigrationEveryTicks: Int
         let walkSpeedCellsPerTick: Double

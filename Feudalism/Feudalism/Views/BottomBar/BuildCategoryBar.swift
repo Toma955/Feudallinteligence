@@ -37,7 +37,7 @@ struct BuildCategoryIcon: View {
         case .cave: BarIconView(assetName: "cave", systemName: "mountain.2.fill", size: size)
         case .farm: BarIconView(assetName: "farm", systemName: "leaf.fill", size: size)
         case .food: BarIconView(assetName: "food", systemName: "fork.knife", size: size)
-        case .infra: BarIconView(assetName: "bridge", systemName: "road.lanes", size: size, asTemplate: true)
+        case .infra: BarIconView(assetName: "drawbridge", systemName: "road.lanes", size: size)
         case .tools: BarIconView(assetName: "tools", systemName: "wrench.and.screwdriver.fill", size: size)
         }
     }
@@ -86,12 +86,11 @@ struct BuildCategoryContent: View {
                 onSelectStable: { select(Stable.objectId) },
                 onSelectMiners: { select(Miners.objectId) },
                 onSelectEngineering: { select(Engineering.objectId) },
-                onSelectTowers: { },
-                onSelectDrawbridge: { }
+                onSelectTowers: { }
             )
         case .farm:
             FarmButtonExpandedView(
-                onSelectAppleFarm: { select(Hive.objectId) },
+                onSelectAppleFarm: { select(AppleOrchard.objectId) },
                 onSelectPigFarm: { select(Pig.objectId) },
                 onSelectHayFarm: { select(Hop.objectId) },
                 onSelectCowFarm: { select(Cow.objectId) },
@@ -152,8 +151,7 @@ struct BuildCategoryContent: View {
                 onSelectPantry: { select(Smocnica.objectId) },
                 onSelectBakery: { select(Bakery.objectId) },
                 onSelectCanteen: { select(Canteen.objectId) },
-                onSelectCandleShop: { select(CandleShop.objectId) },
-                onSelectOrchard: { select(AppleOrchard.objectId) }
+                onSelectCandleShop: { select(CandleShop.objectId) }
             )
         case .cave:
             CaveButtonExpandedView(onSelect: { select($0) })

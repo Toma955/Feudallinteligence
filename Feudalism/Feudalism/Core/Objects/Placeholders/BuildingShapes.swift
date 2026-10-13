@@ -60,19 +60,15 @@ enum BuildingShapes {
 
     static func market() -> SCNNode {
         let root = named("market")
-        k.slab(to: root, width: 5 * s, depth: 5 * s, color: k.earth, height: 0.06)
-        let stalls: [(CGFloat, CGFloat, NSColor)] = [
-            (-1.4, -1.2, NSColor(red: 0.72, green: 0.22, blue: 0.18, alpha: 1)),
-            (1.3, -1.1, NSColor(red: 0.22, green: 0.38, blue: 0.62, alpha: 1)),
-            (-1.3, 1.3, NSColor(red: 0.78, green: 0.62, blue: 0.20, alpha: 1)),
-            (1.25, 1.25, NSColor(red: 0.28, green: 0.48, blue: 0.28, alpha: 1)),
-        ]
-        for stall in stalls {
-            k.box(to: root, 1.7 * s, 0.55 * s, 1.5 * s, k.timber, at: SCNVector3(stall.0 * s, 0.34 * s, stall.1 * s))
-            k.box(to: root, 1.9 * s, 0.08 * s, 1.7 * s, stall.2, at: SCNVector3(stall.0 * s, 1.35 * s, stall.1 * s))
-            k.box(to: root, 0.08 * s, 1.25 * s, 0.08 * s, k.timberDark, at: SCNVector3((stall.0 - 0.75) * s, 0.70 * s, (stall.1 - 0.65) * s))
-            k.box(to: root, 0.08 * s, 1.25 * s, 0.08 * s, k.timberDark, at: SCNVector3((stall.0 + 0.75) * s, 0.70 * s, (stall.1 + 0.65) * s))
-        }
+        let awning = NSColor(red: 0.72, green: 0.18, blue: 0.16, alpha: 1)
+        k.slab(to: root, width: 5 * s, depth: 5 * s, color: k.earth, height: 0.08)
+        k.box(to: root, 4.6 * s, 3.1 * s, 4.2 * s, k.timber, at: SCNVector3(0, 1.55 * s, -0.15 * s))
+        k.roof(to: root, width: 5.15 * s, length: 4.9 * s, height: 1.7 * s, color: k.roofTile, y: 3.1 * s)
+        k.box(to: root, 1.5 * s, 2.15 * s, 0.12 * s, k.door, at: SCNVector3(0, 1.12 * s, 1.98 * s))
+        k.box(to: root, 4.4 * s, 0.1 * s, 1.35 * s, awning, at: SCNVector3(0, 2.55 * s, 2.15 * s))
+        k.box(to: root, 0.1 * s, 2.4 * s, 0.1 * s, k.timberDark, at: SCNVector3(-2.05 * s, 1.2 * s, 2.15 * s))
+        k.box(to: root, 0.1 * s, 2.4 * s, 0.1 * s, k.timberDark, at: SCNVector3(2.05 * s, 1.2 * s, 2.15 * s))
+        k.box(to: root, 3.4 * s, 0.85 * s, 0.7 * s, k.timberDark, at: SCNVector3(0, 0.48 * s, 0.35 * s))
         return root
     }
 

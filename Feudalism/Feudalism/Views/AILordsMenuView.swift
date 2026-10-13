@@ -46,9 +46,11 @@ struct AILordsMenuView: View {
         let vocabulary = profileStore.notebook.vocabulary
         let vocabFormat = LocalizedStrings.string(for: "ai_notebook_vocabulary", language: gameState.appLanguage)
         let actionFormat = LocalizedStrings.string(for: "ai_notebook_actions", language: gameState.appLanguage)
+        let houseFormat = LocalizedStrings.string(for: "ai_notebook_people_per_house", language: gameState.appLanguage)
         return String(format: format, rules.buildings.count, rules.goods.count) + " · "
             + String(format: actionFormat, rules.actions.count) + " · "
-            + String(format: vocabFormat, vocabulary.tokens.count, vocabulary.actions.count)
+            + String(format: vocabFormat, vocabulary.tokens.count, vocabulary.actions.count) + " · "
+            + String(format: houseFormat, profileStore.notebook.peoplePerHouse)
     }
 
     private func lordCard(_ profile: AILordProfile) -> some View {

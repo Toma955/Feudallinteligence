@@ -168,7 +168,7 @@ struct MapEditorView: View {
         .onChange(of: expandedItem) { item in
             if item?.placesObjects == true { eraseMode = false } else { gameState.selectedPlacementObjectId = nil }
         }
-        .alert("Map Editor", isPresented: $showSaveLoadAlert) {
+        .alert("Uređivač mape", isPresented: $showSaveLoadAlert) {
             Button("OK") { showSaveLoadAlert = false }
         } message: {
             if let msg = saveLoadMessage { Text(msg) }
@@ -396,6 +396,16 @@ struct MapEditorView: View {
                 Color(red: 0.22, green: 0.22, blue: 0.24)
                 Color(red: 0.78, green: 0.16, blue: 0.14)
             }
+        case .rijeka:
+            Color(red: 0.25, green: 0.55, blue: 0.88)
+        case .more:
+            Color(red: 0.08, green: 0.24, blue: 0.58)
+        case .pijesak:
+            Color(red: 0.86, green: 0.74, blue: 0.46)
+        case .obicno:
+            Color(red: 0.40, green: 0.27, blue: 0.15)
+        case .mocvara:
+            Color(red: 0.28, green: 0.38, blue: 0.22)
         case .obrisi:
             Color.white.opacity(0.18)
         }

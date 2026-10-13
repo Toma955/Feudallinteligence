@@ -9,8 +9,17 @@ import SwiftUI
 import SceneKit
 import AppKit
 
+enum AboutPreviewTiming {
+    static func after(slot: Int, _ work: @escaping () -> Void) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.02 + Double(slot) * 0.04) {
+            work()
+        }
+    }
+}
+
 struct ObjectPreviewView: NSViewRepresentable {
     var objectId: String
+    var slot: Int = 0
 
     func makeNSView(context: Context) -> SCNView {
         let view = SCNView()
@@ -18,11 +27,22 @@ struct ObjectPreviewView: NSViewRepresentable {
         view.allowsCameraControl = false
         view.backgroundColor = NSColor(white: 0.08, alpha: 0.95)
         view.antialiasingMode = .multisampling4X
-        apply(objectId: objectId, to: view)
         return view
     }
 
     func updateNSView(_ view: SCNView, context: Context) {
+        if view.scene == nil {
+            guard !context.coordinator.scheduled else { return }
+            context.coordinator.scheduled = true
+            let objectId = objectId
+            let slot = slot
+            AboutPreviewTiming.after(slot: slot) { [weak view] in
+                guard let view, view.scene == nil else { return }
+                apply(objectId: objectId, to: view)
+                context.coordinator.shownId = objectId
+            }
+            return
+        }
         guard context.coordinator.shownId != objectId else { return }
         apply(objectId: objectId, to: view)
         context.coordinator.shownId = objectId
@@ -32,6 +52,7 @@ struct ObjectPreviewView: NSViewRepresentable {
 
     final class Coordinator {
         var shownId: String?
+        var scheduled = false
     }
 
     private func apply(objectId: String, to view: SCNView) {
@@ -122,6 +143,7 @@ struct ObjectPreviewView: NSViewRepresentable {
 
 struct SoldierPreviewView: NSViewRepresentable {
     var type: SoldierType
+    var slot: Int = 0
 
     func makeNSView(context: Context) -> SCNView {
         let view = SCNView()
@@ -129,11 +151,21 @@ struct SoldierPreviewView: NSViewRepresentable {
         view.allowsCameraControl = true
         view.backgroundColor = NSColor(white: 0.08, alpha: 0.95)
         view.antialiasingMode = .multisampling4X
-        apply(type: type, to: view)
         return view
     }
 
     func updateNSView(_ view: SCNView, context: Context) {
+        if view.scene == nil {
+            guard !context.coordinator.scheduled else { return }
+            context.coordinator.scheduled = true
+            let type = type
+            AboutPreviewTiming.after(slot: slot) { [weak view] in
+                guard let view, view.scene == nil else { return }
+                apply(type: type, to: view)
+                context.coordinator.shown = type
+            }
+            return
+        }
         guard context.coordinator.shown != type else { return }
         apply(type: type, to: view)
         context.coordinator.shown = type
@@ -143,6 +175,7 @@ struct SoldierPreviewView: NSViewRepresentable {
 
     final class Coordinator {
         var shown: SoldierType?
+        var scheduled = false
     }
 
     private func apply(type: SoldierType, to view: SCNView) {
@@ -231,6 +264,7 @@ enum AboutGoodKind: String, CaseIterable, Identifiable {
 
 struct GoodPreviewView: NSViewRepresentable {
     var kind: AboutGoodKind
+    var slot: Int = 0
 
     func makeNSView(context: Context) -> SCNView {
         let view = SCNView()
@@ -238,11 +272,21 @@ struct GoodPreviewView: NSViewRepresentable {
         view.allowsCameraControl = false
         view.backgroundColor = NSColor(white: 0.08, alpha: 0.95)
         view.antialiasingMode = .multisampling4X
-        view.scene = makeScene(kind)
         return view
     }
 
     func updateNSView(_ view: SCNView, context: Context) {
+        if view.scene == nil {
+            guard !context.coordinator.scheduled else { return }
+            context.coordinator.scheduled = true
+            let kind = kind
+            AboutPreviewTiming.after(slot: slot) { [weak view] in
+                guard let view, view.scene == nil else { return }
+                view.scene = makeScene(kind)
+                context.coordinator.shown = kind
+            }
+            return
+        }
         guard context.coordinator.shown != kind else { return }
         view.scene = makeScene(kind)
         context.coordinator.shown = kind
@@ -252,6 +296,7 @@ struct GoodPreviewView: NSViewRepresentable {
 
     final class Coordinator {
         var shown: AboutGoodKind?
+        var scheduled = false
     }
 
     private func makeScene(_ kind: AboutGoodKind) -> SCNScene {
@@ -382,6 +427,7 @@ struct GoodPreviewView: NSViewRepresentable {
 
 struct PadPreviewView: NSViewRepresentable {
     var pad: PadBrush
+    var slot: Int = 0
 
     func makeNSView(context: Context) -> SCNView {
         let view = SCNView()
@@ -389,11 +435,22 @@ struct PadPreviewView: NSViewRepresentable {
         view.allowsCameraControl = true
         view.backgroundColor = NSColor(white: 0.08, alpha: 0.95)
         view.antialiasingMode = .multisampling4X
-        view.scene = makePadScene(pad)
+        view.rendersContinuously = true
         return view
     }
 
     func updateNSView(_ view: SCNView, context: Context) {
+        if view.scene == nil {
+            guard !context.coordinator.scheduled else { return }
+            context.coordinator.scheduled = true
+            let pad = pad
+            AboutPreviewTiming.after(slot: slot) { [weak view] in
+                guard let view, view.scene == nil else { return }
+                view.scene = makePadScene(pad)
+                context.coordinator.shown = pad
+            }
+            return
+        }
         guard context.coordinator.shown != pad else { return }
         view.scene = makePadScene(pad)
         context.coordinator.shown = pad
@@ -403,6 +460,7 @@ struct PadPreviewView: NSViewRepresentable {
 
     final class Coordinator {
         var shown: PadBrush?
+        var scheduled = false
     }
 
     private func makePadScene(_ pad: PadBrush) -> SCNScene {
@@ -410,13 +468,23 @@ struct PadPreviewView: NSViewRepresentable {
         let tile = SCNNode()
         switch pad {
         case .trava:
-            tile.addChildNode(flat(NSColor(red: 0.38, green: 0.58, blue: 0.24, alpha: 1)))
+            tile.addChildNode(grassTile())
         case .plodna:
             tile.addChildNode(flat(NSColor(red: 0.16, green: 0.68, blue: 0.22, alpha: 1)))
         case .kamen:
-            tile.addChildNode(flat(NSColor(red: 0.58, green: 0.58, blue: 0.62, alpha: 1)))
+            tile.addChildNode(stoneTile())
         case .zeljezo:
-            tile.addChildNode(checker())
+            tile.addChildNode(ironTile())
+        case .rijeka:
+            tile.addChildNode(waterTile(sea: false))
+        case .more:
+            tile.addChildNode(waterTile(sea: true))
+        case .pijesak:
+            tile.addChildNode(flat(NSColor(red: 0.86, green: 0.74, blue: 0.46, alpha: 1)))
+        case .obicno:
+            tile.addChildNode(soilTile())
+        case .mocvara:
+            tile.addChildNode(flat(NSColor(red: 0.28, green: 0.38, blue: 0.22, alpha: 1)))
         case .obrisi:
             tile.addChildNode(flat(NSColor(white: 0.35, alpha: 1)))
         }
@@ -425,10 +493,91 @@ struct PadPreviewView: NSViewRepresentable {
         tile.runAction(spin)
         let camera = SCNNode()
         camera.camera = SCNCamera()
-        camera.position = SCNVector3(2.2, 1.8, 2.4)
-        camera.look(at: SCNVector3(0, 0.1, 0))
+        if pad == .trava {
+            camera.position = SCNVector3(0.85, 0.38, 1.05)
+            camera.look(at: SCNVector3(0, 0.16, 0))
+        } else if pad == .kamen {
+            camera.position = SCNVector3(0.7, 0.48, 0.95)
+            camera.look(at: SCNVector3(0, 0.12, 0))
+        } else if pad == .zeljezo {
+            camera.position = SCNVector3(0.2, 0.62, 0.55)
+            camera.look(at: SCNVector3(0, 0.08, 0))
+        } else if pad == .rijeka || pad == .more {
+            camera.position = SCNVector3(1.15, 0.72, 1.4)
+            camera.look(at: SCNVector3(0, 0.14, 0))
+        } else if pad == .obicno {
+            camera.position = SCNVector3(1.05, 0.85, 1.25)
+            camera.look(at: SCNVector3(0, 0.1, 0))
+        } else {
+            camera.position = SCNVector3(2.2, 1.8, 2.4)
+            camera.look(at: SCNVector3(0, 0.1, 0))
+        }
         scene.rootNode.addChildNode(camera)
         return scene
+    }
+
+    private func grassTile() -> SCNNode {
+        GrassPatch.make()
+    }
+
+    private func stoneTile() -> SCNNode {
+        RockPile.make()
+    }
+
+    private func ironTile() -> SCNNode {
+        RockPile.makeIron()
+    }
+
+    private func waterTile(sea: Bool) -> SCNNode {
+        let root = SCNNode()
+        let bed = SCNBox(width: 2.2, height: 0.14, length: 2.2, chamferRadius: 0)
+        let bedMat = SCNMaterial()
+        bedMat.diffuse.contents = sea
+            ? NSColor(calibratedRed: 0.03, green: 0.12, blue: 0.28, alpha: 1)
+            : NSColor(calibratedRed: 0.62, green: 0.58, blue: 0.40, alpha: 1)
+        bedMat.lightingModel = .lambert
+        bed.materials = [bedMat]
+        let bedNode = SCNNode(geometry: bed)
+        bedNode.position.y = 0.07
+        root.addChildNode(bedNode)
+
+        let plane = SCNPlane(width: 2.2, height: 2.2)
+        plane.widthSegmentCount = 42
+        plane.heightSegmentCount = 42
+        let water = SCNMaterial()
+        water.program = sea ? RiverWaterShader.seaProgram : RiverWaterShader.program
+        water.blendMode = .alpha
+        water.isDoubleSided = true
+        water.writesToDepthBuffer = false
+        water.lightingModel = .constant
+        plane.materials = [water]
+        let surface = SCNNode(geometry: plane)
+        surface.eulerAngles.x = -.pi / 2
+        surface.position.y = 0.2
+        root.addChildNode(surface)
+        return root
+    }
+
+    private func soilTile() -> SCNNode {
+        let box = SCNBox(width: 2.2, height: 0.16, length: 2.2, chamferRadius: 0)
+        let top = SCNMaterial()
+        top.diffuse.contents = soilPreviewImage()
+        top.diffuse.wrapS = .clamp
+        top.diffuse.wrapT = .clamp
+        top.diffuse.magnificationFilter = .linear
+        top.diffuse.minificationFilter = .linear
+        top.lightingModel = .blinn
+        let side = SCNMaterial()
+        side.diffuse.contents = NSColor(calibratedRed: 0.40, green: 0.27, blue: 0.15, alpha: 1)
+        side.lightingModel = .blinn
+        box.materials = [side, side, side, side, top, side]
+        let node = SCNNode(geometry: box)
+        node.position.y = 0.08
+        return node
+    }
+
+    private func soilPreviewImage() -> NSImage {
+        return EarthTiles.previewImage()
     }
 
     private func flat(_ color: NSColor) -> SCNNode {
@@ -440,24 +589,5 @@ struct PadPreviewView: NSViewRepresentable {
         let node = SCNNode(geometry: box)
         node.position.y = 0.08
         return node
-    }
-
-    private func checker() -> SCNNode {
-        let root = SCNNode()
-        let dark = NSColor(red: 0.18, green: 0.18, blue: 0.20, alpha: 1)
-        let red = NSColor(red: 0.82, green: 0.14, blue: 0.12, alpha: 1)
-        let cell: CGFloat = 1.1
-        for r in 0..<2 {
-            for c in 0..<2 {
-                let box = SCNBox(width: cell, height: 0.16, length: cell, chamferRadius: 0)
-                let mat = SCNMaterial()
-                mat.diffuse.contents = (r + c) % 2 == 0 ? dark : red
-                box.materials = [mat]
-                let node = SCNNode(geometry: box)
-                node.position = SCNVector3((CGFloat(c) - 0.5) * cell, 0.08, (CGFloat(r) - 0.5) * cell)
-                root.addChildNode(node)
-            }
-        }
-        return root
     }
 }

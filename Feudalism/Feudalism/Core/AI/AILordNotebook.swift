@@ -16,6 +16,8 @@ struct AILordNotebook: Codable, Equatable, Identifiable {
 
     let id: String
     var pages: [AILordNotebookPage]
+    /// Kuća dodaje toliko ljudi. Zapis je u bilježnici; igra čita ovu varijablu.
+    var peoplePerHouse: Int
 
     var isEmpty: Bool { pages.isEmpty }
 
@@ -26,7 +28,29 @@ struct AILordNotebook: Codable, Equatable, Identifiable {
     var vocabulary: AILordVocabulary { .current }
 
     static var emptyShared: AILordNotebook {
-        AILordNotebook(id: sharedId, pages: [])
+        AILordNotebook(id: sharedId, pages: [], peoplePerHouse: GameState.peoplePerHouse)
+    }
+
+    init(id: String, pages: [AILordNotebookPage], peoplePerHouse: Int) {
+        self.id = id
+        self.pages = pages
+        self.peoplePerHouse = peoplePerHouse
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, pages, peoplePerHouse }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        pages = try c.decodeIfPresent([AILordNotebookPage].self, forKey: .pages) ?? []
+        peoplePerHouse = try c.decodeIfPresent(Int.self, forKey: .peoplePerHouse) ?? GameState.peoplePerHouse
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(pages, forKey: .pages)
+        try c.encode(peoplePerHouse, forKey: .peoplePerHouse)
     }
 }
 

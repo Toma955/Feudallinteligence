@@ -90,74 +90,26 @@ struct MapEditorChoiceView: View {
                 }
                 .buttonStyle(.plain)
                 Spacer(minLength: 0)
-                Text("Map Editor")
-                    .font(.custom("Georgia", size: 22))
-                    .fontWeight(.bold)
-                    .foregroundStyle(.white.opacity(0.98))
-                Spacer(minLength: 0)
-                Color.clear.frame(width: 80, height: 24)
             }
             .padding(.bottom, 8)
 
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Učitaj mapu")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
-
-                HStack(spacing: 12) {
-                    ForEach(MapEditorSlot.allCases) { slot in
-                        let hasSave = gameState.hasEditorMap(inSlot: slot)
-                        let entries = MapCatalog.entries(forSlot: slot)
-                        Button {
-                            if !hasSave || entries.isEmpty {
-                                loadErrorMessage = "Nema spremljene mape za \(slot.displayName)."
-                                loadErrorSlot = slot
-                            } else if entries.count == 1, let entry = entries.first {
-                                if gameState.loadEditorMap(entry: entry) {
-                                    gameState.openMapEditorAfterLoad()
-                                    isPresented = false
-                                } else {
-                                    loadErrorMessage = "Učitavanje mape nije uspjelo."
-                                    loadErrorSlot = slot
-                                }
-                            } else {
-                                withAnimation(.easeInOut(duration: choiceTransitionDuration)) {
-                                    mapPickerSlot = slot
-                                }
-                            }
-                        } label: {
-                            Text(slot.displayName)
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundStyle(hasSave ? .white.opacity(0.95) : .white.opacity(0.5))
-                                .frame(width: choiceTileWidth, height: choiceTileHeight)
-                                .background(hasSave ? Color.white.opacity(0.18) : Color.white.opacity(0.08))
-                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!hasSave)
+            VStack(spacing: 12) {
+                ForEach(MapSizePreset.allCases, id: \.id) { preset in
+                    Button {
+                        selectedPresetForCreate = preset
+                        showCreateNameStep = true
+                        createMapName = ""
+                    } label: {
+                        Text(preset.rawValue)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.95))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: choiceTileHeight)
+                            .background(Color.white.opacity(0.18))
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
+                    .buttonStyle(.plain)
                 }
-            }
-
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Kreiraj novu mapu")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
-
-                Button {
-                    withAnimation(.easeInOut(duration: choiceTransitionDuration)) {
-                        showDimensionPicker = true
-                    }
-                } label: {
-                    Label("Create map", systemImage: "plus.square.on.square")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.95))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: choiceTileHeight)
-                        .background(Color.white.opacity(0.2))
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
-                .buttonStyle(.plain)
             }
 
             Spacer(minLength: 0)

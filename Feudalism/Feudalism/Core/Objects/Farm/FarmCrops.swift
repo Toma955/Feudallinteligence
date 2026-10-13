@@ -70,7 +70,7 @@ enum AppleOrchard: PlaceableSceneKitObject {
     static let displayCode = "JB"
     static var gameObject: GameObject {
         let d = ObjectDimensions.appleOrchard
-        return GameObject(id: objectId, name: "Voćnjak", category: .farme, width: d.cellWidth, height: d.cellHeight, displayCode: displayCode, modelAssetName: nil)
+        return GameObject(id: objectId, name: "Jabuke", category: .farme, width: d.cellWidth, height: d.cellHeight, displayCode: displayCode, modelAssetName: nil)
     }
     static func loadSceneKitNode(from bundle: Bundle = .main) -> SCNNode? {
         FarmYard.makeNode(name: "apple", crop: .apple)

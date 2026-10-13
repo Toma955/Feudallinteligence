@@ -54,10 +54,11 @@ enum HUDResourceCatalog {
         HUDResourceEntry(id: "apple", iconName: "apple_resource", systemFallback: "apple.logo"),
         HUDResourceEntry(id: "cheese", iconName: "cheese_resource", systemFallback: "square.fill"),
         HUDResourceEntry(id: "milk", iconName: "milk_resource", systemFallback: "drop.fill"),
+        HUDResourceEntry(id: "wine", iconName: "vine_resources", systemFallback: "wineglass.fill"),
         HUDResourceEntry(id: "meat", iconName: "meat_resouce", systemFallback: "fork.knife"),
         HUDResourceEntry(id: "sausages", iconName: "sosages_resouce", systemFallback: "fork.knife"),
         HUDResourceEntry(id: "vegetables", iconName: "vegetables_resource", systemFallback: "carrot.fill"),
-        HUDResourceEntry(id: "honey", iconName: "honey_resource", systemFallback: "drop.fill", helpKey: "resource_honey"),
+        HUDResourceEntry(id: "honey", iconName: "honey_resource", systemFallback: "seal.fill", helpKey: "resource_honey"),
         HUDResourceEntry(id: "wax", iconName: "wax_resource", systemFallback: "circle.fill", helpKey: "resource_wax"),
         HUDResourceEntry(id: "candle", iconName: "candle_resource", systemFallback: "flame.fill", helpKey: "resource_candle"),
     ]

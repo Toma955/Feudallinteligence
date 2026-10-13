@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 struct PostavkeView: View {
     @Environment(\.dismiss) private var dismiss
@@ -100,6 +101,7 @@ enum PostavkeSection: String, CaseIterable, Identifiable {
 struct PostavkeSectionContent: View {
     @EnvironmentObject private var gameState: GameState
     let section: PostavkeSection
+    @State private var showFirstLaunchSlot = false
 
     var body: some View {
         Group {
@@ -134,6 +136,16 @@ struct PostavkeSectionContent: View {
                 Toggle("Početna animacija", isOn: $gameState.showStartupAnimation)
                 Toggle("Nazivi u donjem izborniku", isOn: $gameState.showBottomBarLabels)
             } header: { Text("Sučelje") }
+            Section {
+                Button("Simulator prvog paljenja") {
+                    showFirstLaunchSlot = true
+                }
+                if showFirstLaunchSlot {
+                    Text("Ovdje će ići kako se aplikacija ponaša kad se prvi put upali.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } header: { Text("Prvo paljenje") }
             Section {
                 Button("Vrati tvorničke postavke") {
                     gameState.resetUserSettings()
@@ -357,9 +369,23 @@ struct PostavkeSectionContent: View {
     private var profilContent: some View {
         Form {
             Section {
-                TextField("Naziv", text: $gameState.playerProfileName)
-                    .textFieldStyle(.roundedBorder)
-            } header: { Text("Kraljevstvo") }
+                HStack(spacing: 16) {
+                    profileAvatar
+                    VStack(alignment: .leading, spacing: 8) {
+                        TextField("Ime", text: profileGivenName)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("Prezime", text: profileFamilyName)
+                            .textFieldStyle(.roundedBorder)
+                        HStack(spacing: 8) {
+                            Button("Učitaj sliku") { loadProfileImage() }
+                            if !gameState.playerAvatarPath.isEmpty {
+                                Button("Makni sliku") { gameState.playerAvatarPath = "" }
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            } header: { Text("Osoba") }
             Section {
                 Picker("Amblem", selection: $gameState.playerEmblemId) {
                     ForEach(PlayerEmblem.allCases) { emblem in
@@ -369,9 +395,80 @@ struct PostavkeSectionContent: View {
                 }
                 .pickerStyle(.menu)
             } header: { Text("Amblem") }
+            Section {
+                LabeledContent("Sati igranja", value: gameState.profilePlayTimeLabel)
+                LabeledContent("Partije", value: "\(gameState.profileMatchesPlayed)")
+                LabeledContent("Postavljene građevine", value: "\(gameState.profileBuildingsPlaced)")
+            } header: { Text("Mjere") }
         }
         .formStyle(.grouped)
         .padding()
+    }
+
+    private var profileAvatar: some View {
+        ZStack {
+            Circle().fill(Color.white.opacity(0.08))
+            if let image = profileImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: PlayerEmblem(rawValue: gameState.playerEmblemId)?.sfSymbolName ?? "person.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 84, height: 84)
+        .clipShape(Circle())
+        .overlay(Circle().strokeBorder(Color.secondary.opacity(0.35), lineWidth: 1))
+    }
+
+    private var profileImage: NSImage? {
+        let path = gameState.playerAvatarPath
+        guard !path.isEmpty else { return nil }
+        return NSImage(contentsOfFile: path)
+    }
+
+    private var profileGivenName: Binding<String> {
+        Binding(
+            get: { gameState.playerGivenName },
+            set: { gameState.playerProfileName = Self.joinName($0, gameState.playerFamilyName) }
+        )
+    }
+
+    private var profileFamilyName: Binding<String> {
+        Binding(
+            get: { gameState.playerFamilyName },
+            set: { gameState.playerProfileName = Self.joinName(gameState.playerGivenName, $0) }
+        )
+    }
+
+    private static func joinName(_ given: String, _ family: String) -> String {
+        [given, family]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    private func loadProfileImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png, .jpeg, .heic]
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.title = "Učitaj sliku"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("Feudalism", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder ?? URL(fileURLWithPath: NSTemporaryDirectory()), withIntermediateDirectories: true)
+        let dest = (folder ?? URL(fileURLWithPath: NSTemporaryDirectory())).appendingPathComponent("avatar.png")
+        if let image = NSImage(contentsOf: url),
+           let tiff = image.tiffRepresentation,
+           let rep = NSBitmapImageRep(data: tiff),
+           let png = rep.representation(using: .png, properties: [:]) {
+            try? png.write(to: dest)
+            gameState.playerAvatarPath = dest.path
+        }
     }
 
     private var bleContent: some View {

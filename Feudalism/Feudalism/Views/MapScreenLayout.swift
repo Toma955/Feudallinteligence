@@ -15,12 +15,14 @@ struct MapScreenHUDBar<Content: View>: View {
     var onBackgroundTap: (() -> Void)?
     var barHeight: CGFloat
     var itemSpacing: CGFloat
+    var expandsDown: Bool
     @ViewBuilder let content: () -> Content
 
-    init(onBackgroundTap: (() -> Void)? = nil, barHeight: CGFloat = 52, itemSpacing: CGFloat = 16, @ViewBuilder content: @escaping () -> Content) {
+    init(onBackgroundTap: (() -> Void)? = nil, barHeight: CGFloat = 52, itemSpacing: CGFloat = 16, expandsDown: Bool = false, @ViewBuilder content: @escaping () -> Content) {
         self.onBackgroundTap = onBackgroundTap
         self.barHeight = barHeight
         self.itemSpacing = itemSpacing
+        self.expandsDown = expandsDown
         self.content = content
     }
 
@@ -38,13 +40,13 @@ struct MapScreenHUDBar<Content: View>: View {
     }
 
     private var hudPill: some View {
-        let pill = HStack(spacing: itemSpacing) {
+        let pill = HStack(alignment: expandsDown ? .top : .center, spacing: itemSpacing) {
             content()
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 0)
-        .fixedSize(horizontal: true, vertical: false)
-                .frame(minHeight: barHeight, maxHeight: barHeight)
+        .padding(.vertical, expandsDown ? 8 : 0)
+        .fixedSize(horizontal: true, vertical: expandsDown)
+        .frame(minHeight: barHeight, maxHeight: expandsDown ? nil : barHeight, alignment: .top)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
         .clipShape(RoundedRectangle(cornerRadius: 10))
 

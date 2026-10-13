@@ -9,7 +9,7 @@
 import SceneKit
 import AppKit
 
-func syncPeople(on root: SCNNode, snapshots: [PersonRenderSnapshot], rows: Int, cols: Int, viewUnderground: Bool = false) {
+func syncPeople(on root: SCNNode, snapshots: [PersonRenderSnapshot], rows: Int, cols: Int, viewUnderground: Bool = false, gameMap: GameMap) {
     let live = Set(snapshots.map(\.id))
     for child in root.childNodes {
         guard let name = child.name, name.hasPrefix("person-") else { continue }
@@ -43,7 +43,8 @@ func syncPeople(on root: SCNNode, snapshots: [PersonRenderSnapshot], rows: Int, 
         let x = CGFloat(snap.col) * cell - halfW + cell / 2
         let z = CGFloat(snap.row) * cell - halfH + cell / 2
         let bob = snap.moving ? CGFloat(abs(sin(snap.walkPhase * 2))) * 0.035 : 0
-        let yBase: CGFloat = snap.layer == .underground ? -Underground.depthMeters : 0
+        let ground = gameMap.vertexHeightAt(vertexRow: Int(snap.row.rounded()), vertexCol: Int(snap.col.rounded()))
+        let yBase: CGFloat = snap.layer == .underground ? -Underground.depthMeters : ground
         person.position = SCNVector3(x, yBase + bob, z)
         person.eulerAngles = SCNVector3(0, snap.facing, 0)
         let swing = CGFloat(sin(snap.walkPhase))

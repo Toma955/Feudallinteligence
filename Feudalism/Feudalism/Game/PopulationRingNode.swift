@@ -13,11 +13,12 @@ import QuartzCore
 
 enum PopulationRingStyle {
     static let segments = 72
-    static let pipeRadius: CGFloat = 0.055
-    static let height: CGFloat = 2.15
-    static let fallbackRadius: CGFloat = 1.55
+    static let pipeRadius: CGFloat = 0.09
+    /// Iznad kamenja vatre, u lokalnom prostoru čvora vatre.
+    static let height: CGFloat = 0.2
+    static let fallbackRadius: CGFloat = 1.08
 
-    static let track: SCNMaterial = material(NSColor(white: 0.92, alpha: 1), transparency: 0.28)
+    static let track: SCNMaterial = material(NSColor(red: 0.22, green: 0.86, blue: 0.34, alpha: 1), transparency: 0.38)
     static let green: SCNMaterial = material(NSColor(red: 0.22, green: 0.86, blue: 0.34, alpha: 1), transparency: 1)
     static let red: SCNMaterial = material(NSColor(red: 0.92, green: 0.2, blue: 0.16, alpha: 1), transparency: 1)
 
@@ -32,34 +33,43 @@ enum PopulationRingStyle {
     }
 }
 
-func placePopulationRing(in node: SCNNode, at hearth: SCNVector3, ring: PopulationRingSnapshot?) {
+func placePopulationRing(on hearth: SCNNode, ring: PopulationRingSnapshot?) {
     let radius = CGFloat(ring?.radius ?? PopulationRingStyle.fallbackRadius)
+    hearth.parent?.childNode(withName: "populationRing", recursively: false)?.removeFromParentNode()
     let root: SCNNode
-    if let existing = node.childNode(withName: "populationRing", recursively: false) {
+    if let existing = hearth.childNode(withName: "populationRing", recursively: false) {
         let old = (existing.childNode(withName: "track", recursively: false)?.geometry as? SCNTorus)?.ringRadius ?? 0
         if abs(old - radius) > 0.04 {
             existing.removeFromParentNode()
             root = makePopulationRing(radius: radius)
-            node.addChildNode(root)
+            hearth.addChildNode(root)
         } else {
             root = existing
         }
     } else {
         root = makePopulationRing(radius: radius)
-        node.addChildNode(root)
+        hearth.addChildNode(root)
     }
-    root.position = SCNVector3(hearth.x, PopulationRingStyle.height, hearth.z)
+    root.position = SCNVector3(0, PopulationRingStyle.height, 0)
 
     let trend = ring?.trend ?? .steady
-    let shown = ring?.shown(at: CACurrentMediaTime()) ?? 0
+    let shown = ring?.shown(at: CACurrentMediaTime()) ?? (trend == .steady ? 1 : 0)
     let total = PopulationRingStyle.segments
-    let filled = trend == .steady ? total : Int((shown * Double(total)).rounded())
+    let filled = trend == .steady ? total : Int((min(1, max(0, shown)) * Double(total)).rounded())
+    if let trackNode = root.childNode(withName: "track", recursively: false) {
+        let steady = trend == .steady
+        trackNode.isHidden = !steady
+        let wanted = steady ? PopulationRingStyle.green : PopulationRingStyle.track
+        if trackNode.geometry?.firstMaterial !== wanted {
+            trackNode.geometry?.materials = [wanted]
+        }
+    }
     for child in root.childNodes {
         guard let name = child.name, name.hasPrefix("fill-"), let index = Int(name.dropFirst(5)) else { continue }
         let on: Bool
         switch trend {
         case .steady:
-            on = true
+            on = false
         case .growing:
             on = index < filled
         case .shrinking:
@@ -87,6 +97,7 @@ private func makePopulationRing(radius: CGFloat) -> SCNNode {
     track.materials = [PopulationRingStyle.track]
     let trackNode = SCNNode(geometry: track)
     trackNode.name = "track"
+    trackNode.eulerAngles.x = .pi / 2
     trackNode.categoryBitMask = 1
     root.addChildNode(trackNode)
 

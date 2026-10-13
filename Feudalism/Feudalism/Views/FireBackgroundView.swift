@@ -8,6 +8,8 @@
 import SwiftUI
 
 struct FireBackgroundView: View {
+    var hueDegrees: Double = 0
+
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { context in
             let t = context.date.timeIntervalSinceReferenceDate
@@ -23,6 +25,7 @@ struct FireBackgroundView: View {
                     }
                     EdgeVignette(width: geo.size.width, height: geo.size.height)
                 }
+                .hueRotation(.degrees(hueDegrees))
             }
             .ignoresSafeArea()
         }

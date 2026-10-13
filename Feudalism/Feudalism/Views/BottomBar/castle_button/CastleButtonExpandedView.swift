@@ -20,7 +20,6 @@ struct CastleButtonExpandedView: View {
     var onSelectMiners: () -> Void
     var onSelectEngineering: () -> Void
     var onSelectTowers: () -> Void
-    var onSelectDrawbridge: () -> Void
 
     var body: some View {
         CategoryExpandedView(items: [
@@ -35,7 +34,6 @@ struct CastleButtonExpandedView: View {
             CategoryExpandedItem(assetName: "pickaxe", systemName: "hammer.fill", labelKey: "castle_miners", action: onSelectMiners),
             CategoryExpandedItem(assetName: "devider", systemName: "wrench.and.screwdriver.fill", labelKey: "castle_engineering", action: onSelectEngineering),
             CategoryExpandedItem(assetName: "towers", systemName: "building.columns.fill", labelKey: "castle_towers", action: onSelectTowers),
-            CategoryExpandedItem(assetName: "drawbridge", systemName: "rectangle.portrait.bottomhalf.filled", labelKey: "castle_drawbridge", action: onSelectDrawbridge),
         ])
     }
 }

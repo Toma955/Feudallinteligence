@@ -70,6 +70,9 @@ struct BuildingStatusView: View {
             if mine, p.objectId == Training.objectId {
                 TrainingPanelView(faction: faction)
             }
+            if mine, p.objectId == Market.objectId {
+                MarketTradePanel()
+            }
             if let kind = StorageKind.of(buildingId: p.objectId) {
                 storageInventory(kind, placement: p, faction: faction, mine: mine)
             }
@@ -358,6 +361,50 @@ struct BuildingStatusView: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct MarketTradePanel: View {
+    @EnvironmentObject private var gameState: GameState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Kupnja i prodaja za zlato")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.8))
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(MarketPrices.offers, id: \.good) { offer in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(offer.good.displayName)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.white)
+                            Text("ima \(gameState.goodAmount(offer.good))")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.55))
+                            HStack(spacing: 4) {
+                                tradeButton("Kupi \(offer.buy)") { gameState.marketBuy(offer.good) }
+                                tradeButton("Prodaj \(offer.sell)") { gameState.marketSell(offer.good) }
+                            }
+                        }
+                        .padding(8)
+                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
+        }
+    }
+
+    private func tradeButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.black)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .background(Color.yellow, in: Capsule())
         }
         .buttonStyle(.plain)
     }
