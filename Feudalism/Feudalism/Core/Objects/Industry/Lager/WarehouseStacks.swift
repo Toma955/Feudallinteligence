@@ -3,7 +3,8 @@
 //  Feudalism
 //
 //  Jedno polje 2×2 = jedan resurs. Kupnja diže hrpu, prodaja je spušta.
-//  Hrpe se crte u "warehouse_stock" unutar modela skladišta (kao košare u smočnici).
+//  Hrpe stoje u world koordinatama na čvoru "warehouse" (ne unutar modela
+//  koji se briše pri refreshPlacements).
 //
 
 import Foundation
@@ -11,17 +12,6 @@ import SceneKit
 import AppKit
 
 enum WarehouseStacks {
-    /// Lokalni centri polja 2×2 u modelu lagera (isti raspored kao padovi u BuildingShapes.lager).
-    private static let baySpots: [(bay: LagerPlan.Bay, x: CGFloat, z: CGFloat)] = [
-        (LagerPlan.Bay(row: 0, col: 0), -1.5, -1.5),
-        (LagerPlan.Bay(row: 0, col: 3), 1.5, -1.5),
-        (LagerPlan.Bay(row: 3, col: 0), -1.5, 1.5),
-        (LagerPlan.Bay(row: 3, col: 3), 1.5, 1.5)
-    ]
-
-    /// Visina vrha jastuka u modelu (base + pad).
-    private static let padTopY: CGFloat = 0.21
-
     static func stockKey(_ gameState: GameState) -> String {
         var parts: [String] = [
             "v\(gameState.placementsVersion)",
@@ -41,23 +31,70 @@ enum WarehouseStacks {
         return parts.joined(separator: "|")
     }
 
-    /// Osvježi hrpe u svim skladištima pod `placements` čvorom. Samo main thread.
-    static func refresh(in root: SCNNode, gameState: GameState) {
-        let stores = gameState.gameMap.placements
-            .filter { $0.objectId == Lager.objectId && !$0.isDestroyed }
-            .sorted { gameState.buildingBirthRank($0.id) < gameState.buildingBirthRank($1.id) }
+    /// Crta hrpe na poljima skladišta. Zvati s main ili renderer niti (kao smočnica).
+    static func syncWorld(on root: SCNNode, gameState: GameState, rows: Int, cols: Int) {
+        let key = stockKey(gameState)
+        let stamp = "k\(key.hashValue)"
+        root.name = "warehouse"
+        if let mark = root.childNode(withName: "stockMark", recursively: false),
+           mark.childNodes.first?.name == stamp {
+            return
+        }
 
+        root.childNodes.filter {
+            let n = $0.name ?? ""
+            return n == "stockMark" || n.hasPrefix("pile-")
+        }.forEach { $0.removeFromParentNode() }
+
+        let mark = SCNNode()
+        mark.name = "stockMark"
+        let tag = SCNNode()
+        tag.name = stamp
+        mark.addChildNode(tag)
+        root.addChildNode(mark)
+
+        let cell = MapScale.worldUnitsPerMapCell
+        let halfW = MapScale.worldWidth(cols: cols) / 2
+        let halfH = MapScale.worldHeight(rows: rows) / 2
+        /// Kontinuirane koordinate: 0 = rub mape, centar ćelije N je N+0.5.
+        /// Građevina 5×5 stoji na centru (row+2.5, col+2.5); jastuci su na ±1.5 od toga.
+        func worldContinuous(row: Double, col: Double, y: CGFloat) -> SCNVector3 {
+            SCNVector3(
+                CGFloat(col) * cell - halfW,
+                y,
+                CGFloat(row) * cell - halfH
+            )
+        }
+        /// Isti raspored kao BuildingShapes.lager spots (±1.5, ±1.5).
+        func padCenter(store: Placement, bay: LagerPlan.Bay) -> (row: Double, col: Double) {
+            let midRow = Double(store.row) + Double(store.height) / 2
+            let midCol = Double(store.col) + Double(store.width) / 2
+            let spot: (x: Double, z: Double)
+            switch (bay.row, bay.col) {
+            case (0, 0): spot = (-1.5, -1.5)
+            case (0, 3): spot = (1.5, -1.5)
+            case (3, 0): spot = (-1.5, 1.5)
+            default: spot = (1.5, 1.5)
+            }
+            return (midRow + spot.z, midCol + spot.x)
+        }
+
+        let stores = gameState.gameMap.placements.filter {
+            $0.objectId == Lager.objectId && !$0.isDestroyed
+        }
         var byOwner: [String: [Placement]] = [:]
         for store in stores {
             let owner = gameState.owner(of: store) ?? gameState.playerSeat?.id ?? ""
             byOwner[owner, default: []].append(store)
         }
 
-        var assignment: [String: [(bay: LagerPlan.Bay, good: Good, amount: Int)]] = [:]
         for (owner, list) in byOwner {
-            var free: [(storeId: String, bay: LagerPlan.Bay)] = []
-            for store in list {
-                for bay in LagerPlan.bays { free.append((store.id, bay)) }
+            let ordered = list.sorted {
+                gameState.buildingBirthRank($0.id) < gameState.buildingBirthRank($1.id)
+            }
+            var free: [(Placement, LagerPlan.Bay)] = []
+            for store in ordered {
+                for bay in LagerPlan.bays { free.append((store, bay)) }
             }
             var cursor = 0
             for good in Good.allCases where good != .gold {
@@ -66,88 +103,63 @@ enum WarehouseStacks {
                 let limit = max(1, WarehouseSpotNotebook.limit(for: good))
                 while left > 0, cursor < free.count {
                     let n = min(limit, left)
-                    let spot = free[cursor]
-                    assignment[spot.storeId, default: []].append((spot.bay, good, n))
+                    let (store, bay) = free[cursor]
+                    let pile = makeMarker(good, step: cell)
+                    let fill = max(0.45, min(1, CGFloat(n) / CGFloat(limit)))
+                    pile.scale = SCNVector3(1, fill, 1)
+                    let pad = padCenter(store: store, bay: bay)
+                    let surfaceY = terrainY(gameState: gameState, row: Int(pad.row), col: Int(pad.col))
+                    pile.position = worldContinuous(row: pad.row, col: pad.col, y: surfaceY + 0.35)
+                    pile.name = "pile-\(store.id)-\(bay.row)-\(bay.col)"
+                    pile.categoryBitMask = 1
+                    pile.renderingOrder = 120
+                    root.addChildNode(pile)
                     left -= n
                     cursor += 1
                 }
             }
         }
-
-        root.enumerateChildNodes { node, _ in
-            guard let name = node.name, name.hasPrefix("lager_place_") else { return }
-            let id = String(name.dropFirst("lager_place_".count))
-            guard let host = node.childNode(withName: "lager", recursively: true) else { return }
-            let stock: SCNNode
-            if let existing = host.childNode(withName: "warehouse_stock", recursively: false) {
-                stock = existing
-            } else {
-                let created = SCNNode()
-                created.name = "warehouse_stock"
-                host.addChildNode(created)
-                stock = created
-            }
-            fill(stock: stock, piles: assignment[id] ?? [])
-        }
     }
 
-    private static func fill(stock: SCNNode, piles: [(bay: LagerPlan.Bay, good: Good, amount: Int)]) {
-        let step = BuildingKit.cell
-        let sig = piles
-            .map { "\($0.bay.row),\($0.bay.col):\($0.good.rawValue):\($0.amount)" }
-            .sorted()
-            .joined(separator: "|")
-        let markName = "wsig"
-        if let mark = stock.childNode(withName: markName, recursively: false),
-           mark.childNodes.first?.name == sig {
-            return
-        }
-        stock.childNodes.forEach { $0.removeFromParentNode() }
-        let mark = SCNNode()
-        mark.name = markName
-        let tag = SCNNode()
-        tag.name = sig.isEmpty ? "-" : sig
-        mark.addChildNode(tag)
-        stock.addChildNode(mark)
-
-        for pile in piles {
-            guard let spot = baySpots.first(where: { $0.bay == pile.bay }) else { continue }
-            let marker = makeMarker(pile.good, step: step)
-            let limit = max(1, WarehouseSpotNotebook.limit(for: pile.good))
-            let fill = max(0.35, min(1, CGFloat(pile.amount) / CGFloat(limit)))
-            marker.scale = SCNVector3(1, fill, 1)
-            marker.position = SCNVector3(spot.x * step, padTopY * step, spot.z * step)
-            marker.name = "pile-\(pile.bay.row)-\(pile.bay.col)"
-            marker.categoryBitMask = 0
-            marker.renderingOrder = 50
-            stock.addChildNode(marker)
-        }
+    private static func terrainY(gameState: GameState, row: Int, col: Int) -> CGFloat {
+        let map = gameState.gameMap
+        guard row >= 0, col >= 0, row < map.rows, col < map.cols else { return 0 }
+        return CGFloat(map.surface(row: row, col: col).center.height)
     }
 
-    /// Oznaka na polju: daska, kamen, metal ili vreće brašna.
+    /// Oznaka na polju: daska, kamen, metal ili vreće — dovoljno visoko da se vidi s kamere.
     private static func makeMarker(_ good: Good, step: CGFloat) -> SCNNode {
         let root = SCNNode()
-        root.categoryBitMask = 0
+        root.categoryBitMask = 1
         switch good {
         case .wood:
-            for i in 0..<6 {
-                let plank = box(width: step * 1.55, height: step * 0.09, length: step * 0.78, material: woodMaterial)
-                plank.position = SCNVector3(0, step * 0.09 * (CGFloat(i) + 0.5), 0)
-                plank.eulerAngles.y = i.isMultiple(of: 2) ? 0.05 : -0.07
+            // Donji red: 5 dasaka jedna uz drugu. Gornji red: 5 poprečno.
+            let plankH = step * 0.16
+            let plankLong = step * 1.75
+            let plankThick = step * 0.30
+            let gap = step * 0.34
+            for i in 0..<5 {
+                let plank = box(width: plankLong, height: plankH, length: plankThick, material: woodMaterial)
+                plank.position = SCNVector3(0, plankH * 0.5, CGFloat(i - 2) * gap)
+                root.addChildNode(plank)
+            }
+            for i in 0..<5 {
+                let plank = box(width: plankThick, height: plankH, length: plankLong, material: woodMaterial)
+                plank.position = SCNVector3(CGFloat(i - 2) * gap, plankH * 1.5, 0)
                 root.addChildNode(plank)
             }
         case .stone:
-            let lower = box(width: step * 1.25, height: step * 0.42, length: step * 1.05, material: stoneMaterial)
-            lower.position = SCNVector3(0, step * 0.21, 0)
-            let upper = box(width: step * 0.85, height: step * 0.32, length: step * 0.7, material: stoneMaterial)
-            upper.position = SCNVector3(step * 0.12, step * 0.58, step * -0.08)
-            upper.eulerAngles.y = 0.2
+            let lower = box(width: step * 1.7, height: step * 0.75, length: step * 1.55, material: stoneMaterial)
+            lower.position = SCNVector3(0, step * 0.38, 0)
+            let upper = box(width: step * 1.25, height: step * 0.6, length: step * 1.1, material: stoneMaterial)
+            upper.position = SCNVector3(step * 0.1, step * 0.95, step * -0.06)
+            upper.eulerAngles.y = 0.18
             root.addChildNode(lower)
             root.addChildNode(upper)
         case .iron:
             for i in 0..<5 {
-                let bar = box(width: step * 1.4, height: step * 0.08, length: step * 0.32, material: ironMaterial)
-                bar.position = SCNVector3(0, step * 0.08 * (CGFloat(i) + 0.5), CGFloat(i - 2) * step * 0.015)
+                let bar = box(width: step * 1.45, height: step * 0.12, length: step * 0.38, material: ironMaterial)
+                bar.position = SCNVector3(0, step * 0.12 * (CGFloat(i) + 0.5), CGFloat(i - 2) * step * 0.02)
                 bar.eulerAngles.y = 0.08
                 root.addChildNode(bar)
             }
@@ -157,25 +169,25 @@ enum WarehouseStacks {
             let spots: [(CGFloat, CGFloat)] = [(-0.28, 0.05), (0.22, -0.12), (0.02, 0.22)]
             for (i, spot) in spots.enumerated() {
                 let sack = SCNNode()
-                let body = SCNSphere(radius: step * 0.32)
+                let body = SCNSphere(radius: step * 0.38)
                 body.materials = [cloth]
                 let bodyNode = SCNNode(geometry: body)
                 bodyNode.scale = SCNVector3(1.05, 1.35, 0.82)
-                bodyNode.categoryBitMask = 0
-                let neck = SCNCylinder(radius: step * 0.07, height: step * 0.14)
+                bodyNode.categoryBitMask = 1
+                let neck = SCNCylinder(radius: step * 0.08, height: step * 0.16)
                 neck.materials = [tie]
                 let neckNode = SCNNode(geometry: neck)
-                neckNode.position = SCNVector3(0, step * 0.38, 0)
-                neckNode.categoryBitMask = 0
+                neckNode.position = SCNVector3(0, step * 0.45, 0)
+                neckNode.categoryBitMask = 1
                 sack.addChildNode(bodyNode)
                 sack.addChildNode(neckNode)
-                sack.position = SCNVector3(spot.0 * step, step * 0.34, spot.1 * step)
+                sack.position = SCNVector3(spot.0 * step, step * 0.4, spot.1 * step)
                 sack.eulerAngles.z = i == 1 ? 0.18 : -0.08
                 root.addChildNode(sack)
             }
         default:
-            let crate = box(width: step * 0.9, height: step * 0.55, length: step * 0.9, material: solid(crateColor(good)))
-            crate.position = SCNVector3(0, step * 0.28, 0)
+            let crate = box(width: step * 1.0, height: step * 0.7, length: step * 1.0, material: solid(crateColor(good)))
+            crate.position = SCNVector3(0, step * 0.35, 0)
             root.addChildNode(crate)
         }
         return root
@@ -185,7 +197,7 @@ enum WarehouseStacks {
         let geometry = SCNBox(width: width, height: height, length: length, chamferRadius: min(width, length) * 0.02)
         geometry.materials = Array(repeating: material, count: 6)
         let node = SCNNode(geometry: geometry)
-        node.categoryBitMask = 0
+        node.categoryBitMask = 1
         return node
     }
 
@@ -198,6 +210,7 @@ enum WarehouseStacks {
         case .wool: return NSColor(red: 0.82, green: 0.80, blue: 0.74, alpha: 1)
         case .corn: return NSColor(red: 0.86, green: 0.72, blue: 0.22, alpha: 1)
         case .grapes: return NSColor(red: 0.42, green: 0.18, blue: 0.38, alpha: 1)
+        case .honey: return NSColor(red: 0.86, green: 0.62, blue: 0.16, alpha: 1)
         case .wax: return NSColor(red: 0.90, green: 0.78, blue: 0.42, alpha: 1)
         case .candle: return NSColor(red: 0.92, green: 0.86, blue: 0.62, alpha: 1)
         case .wine: return NSColor(red: 0.42, green: 0.10, blue: 0.16, alpha: 1)
@@ -225,6 +238,8 @@ enum WarehouseStacks {
         mat.ambient.contents = color
         mat.lightingModel = .constant
         mat.isDoubleSided = true
+        mat.writesToDepthBuffer = true
+        mat.readsFromDepthBuffer = true
         return mat
     }
 

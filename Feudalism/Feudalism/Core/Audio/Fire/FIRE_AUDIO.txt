@@ -1,0 +1,3 @@
+Fire/ – stavi ovdje:
+  fire_start.wav (ili .mp3)  – kad se zapali
+  fire_loop.wav  (ili .mp3)  – petlja dok gori

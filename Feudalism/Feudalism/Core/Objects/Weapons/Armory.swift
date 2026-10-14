@@ -19,7 +19,7 @@ enum Armory: PlaceableSceneKitObject {
     }
 
     static func loadSceneKitNode(from bundle: Bundle = .main) -> SCNNode? {
-        WeaponYard.makeNode(name: "armory", craft: .armory)
+        WeaponYard.makeNode(name: "armory", craft: .armory, cells: ObjectDimensions.armory.cellWidth)
     }
 
     static func reapplyTexture(to node: SCNNode, bundle: Bundle = .main) -> Bool { true }

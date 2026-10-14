@@ -60,8 +60,8 @@ enum ObjectDimensions {
     static let windmill = ObjectDimension(cellWidth: 3, cellHeight: 2, heightCells: 10)
     static let bakery = ObjectDimension(cellWidth: 4, cellHeight: 4, heightCells: 2)
     static let granary = ObjectDimension(cellWidth: 5, cellHeight: 5, heightCells: 4)
-    /// Pivovara: 5×5×4.
-    static let brewery = ObjectDimension(cellWidth: 5, cellHeight: 5, heightCells: 4)
+    /// Pivovara: 4×4×4.
+    static let brewery = ObjectDimension(cellWidth: 4, cellHeight: 4, heightCells: 4)
     /// Destilerija: 4×4×5.
     static let distillery = ObjectDimension(cellWidth: 4, cellHeight: 4, heightCells: 5)
     /// Vinski podrum: 5×5×3.

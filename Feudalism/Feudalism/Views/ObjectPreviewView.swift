@@ -475,7 +475,7 @@ struct PadPreviewView: NSViewRepresentable {
             tile.addChildNode(stoneTile())
         case .zeljezo:
             tile.addChildNode(ironTile())
-        case .rijeka:
+        case .voda, .jezero:
             tile.addChildNode(waterTile(sea: false))
         case .more:
             tile.addChildNode(waterTile(sea: true))
@@ -502,7 +502,7 @@ struct PadPreviewView: NSViewRepresentable {
         } else if pad == .zeljezo {
             camera.position = SCNVector3(0.2, 0.62, 0.55)
             camera.look(at: SCNVector3(0, 0.08, 0))
-        } else if pad == .rijeka || pad == .more {
+        } else if pad.isWater {
             camera.position = SCNVector3(1.15, 0.72, 1.4)
             camera.look(at: SCNVector3(0, 0.14, 0))
         } else if pad == .obicno {

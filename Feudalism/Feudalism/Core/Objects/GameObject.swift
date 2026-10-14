@@ -77,7 +77,6 @@ extension ObjectCategory {
                 Tavern.gameObject,
                 Smocnica.gameObject,
                 Canteen.gameObject,
-                CandleShop.gameObject,
                 GameObject(name: "Pšenica", category: .hrana),
                 GameObject(name: "Povrće", category: .hrana)
             ]
@@ -87,7 +86,6 @@ extension ObjectCategory {
                 Chicken.gameObject,
                 Corn.gameObject,
                 Hop.gameObject,
-                Hive.gameObject,
                 Vegetables.gameObject,
                 Grapes.gameObject,
                 Spices.gameObject,

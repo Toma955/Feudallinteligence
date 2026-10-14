@@ -281,7 +281,9 @@ struct MainMenuView: View {
             }
             dockTile(title: L("menu_map_editor"), icon: "map.fill", id: "menu_map_editor") {
                 AudioManager.shared.stopIntroSoundtrack()
-                withAnimation(.easeInOut(duration: menuPostavkeTransitionDuration)) { showMapEditorChoice = true }
+                // Zakomentirano: ekran izbora / unos imena mape — odmah 200×200 editor.
+                // withAnimation(.easeInOut(duration: menuPostavkeTransitionDuration)) { showMapEditorChoice = true }
+                gameState.createMapAndOpenEditor(name: "Mapa", side: MapSizePreset.size200.side) { _ in }
             }
             dockTile(title: L("menu_settings"), icon: "gearshape.fill", id: "menu_settings") {
                 withAnimation(.easeInOut(duration: menuPostavkeTransitionDuration)) { showPostavke = true }

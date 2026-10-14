@@ -2,7 +2,7 @@
 //  Hive.swift
 //  Feudalism
 //
-//  Košnica: med i vosak. Vosak ide u svijećarnicu.
+//  Zastarjelo: košnice su sada na farmi cvijeća. Ostaje samo za stare mape.
 //
 
 import Foundation

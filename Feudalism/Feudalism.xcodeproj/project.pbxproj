@@ -479,7 +479,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\nRES=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources\"\nMAP=\"$RES/Core/Objects/Textures/map\"\nmkdir -p \"$MAP\"\nSRC=\"${SRCROOT}/Feudalism/Core/Objects/Textures/map\"\ncp \"$SRC/\"*.json \"$MAP/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$MAP/\" 2>/dev/null || true\ncp \"$SRC/\"*.jpg \"$MAP/\" 2>/dev/null || true\n";
+			shellScript = "set -e\nRES=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources\"\nMAP=\"$RES/Core/Objects/Textures/map\"\nmkdir -p \"$MAP\"\nSRC=\"${SRCROOT}/Feudalism/Core/Objects/Textures/map\"\ncp \"$SRC/\"*.json \"$MAP/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$MAP/\" 2>/dev/null || true\ncp \"$SRC/\"*.jpg \"$MAP/\" 2>/dev/null || true\n# sea/river: bottom|wall|coast + Sea_*_texture_N.png\nrm -rf \"$MAP/sea\" \"$MAP/river\"\nmkdir -p \"$MAP/sea/bottom\" \"$MAP/sea/wall\" \"$MAP/sea/coast\" \"$MAP/river/bottom\" \"$MAP/river/wall\" \"$MAP/river/coast\"\ncp -R \"$SRC/sea/.\" \"$MAP/sea/\" 2>/dev/null || true\ncp -R \"$SRC/river/.\" \"$MAP/river/\" 2>/dev/null || true\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

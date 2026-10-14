@@ -34,9 +34,16 @@ struct MarketOffer {
 enum MarketPrices {
     static let offers: [MarketOffer] = [
         MarketOffer(good: .apple, buy: 2, sell: 1),
+        MarketOffer(good: .banana, buy: 2, sell: 1),
+        MarketOffer(good: .honey, buy: 3, sell: 2),
         MarketOffer(good: .bread, buy: 3, sell: 2),
         MarketOffer(good: .cheese, buy: 4, sell: 2),
         MarketOffer(good: .meat, buy: 5, sell: 3),
+        MarketOffer(good: .chicken, buy: 4, sell: 2),
+        MarketOffer(good: .eggs, buy: 2, sell: 1),
+        MarketOffer(good: .vegetables, buy: 2, sell: 1),
+        MarketOffer(good: .corn, buy: 2, sell: 1),
+        MarketOffer(good: .grapes, buy: 3, sell: 1),
         MarketOffer(good: .wood, buy: 2, sell: 1),
         MarketOffer(good: .stone, buy: 2, sell: 1),
         MarketOffer(good: .iron, buy: 6, sell: 4),

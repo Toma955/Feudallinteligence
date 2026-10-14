@@ -129,6 +129,7 @@ final class PeopleRuntime {
                 case .returningToWork(let id): people[i].activity = .working(placementId: id)
                 case .walkingToTree(let hut, let tree): people[i].activity = .chopping(hutId: hut, treeId: tree)
                 case .haulingLog(let hut, _): people[i].activity = .working(placementId: hut)
+                case .walkingToField(let id, let task): people[i].activity = .workingField(placementId: id, task: task)
                 case .soldierMoving: people[i].activity = .soldierIdle
                 default: break
                 }
@@ -155,7 +156,7 @@ final class PeopleRuntime {
                 row: p.row,
                 col: p.col,
                 facing: p.facing,
-                moving: p.activity.isMoving,
+                moving: p.activity.isMoving || p.isFieldWorking,
                 walkPhase: p.walkPhase,
                 visible: p.isVisible,
                 layer: p.layer

@@ -2,7 +2,8 @@
 //  Spring.swift
 //  Feudalism
 //
-//  Izvor: 2×2, nizak. Smije se postaviti samo na podzemnu vodu. Privremeni placeholder.
+//  Izvor: 2×2, nizak. Samo na podzemnu vodu. Jednom postavljen je nepromjenjiv;
+//  podzemlje ispod njega automatski je okupirano rijekom. Protok se namješta u stanju građevine.
 //
 
 import Foundation

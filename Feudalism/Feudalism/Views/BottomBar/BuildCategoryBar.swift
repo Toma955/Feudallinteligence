@@ -150,8 +150,7 @@ struct BuildCategoryContent: View {
                 onSelectTavern: { select(Tavern.objectId) },
                 onSelectPantry: { select(Smocnica.objectId) },
                 onSelectBakery: { select(Bakery.objectId) },
-                onSelectCanteen: { select(Canteen.objectId) },
-                onSelectCandleShop: { select(CandleShop.objectId) }
+                onSelectCanteen: { select(Canteen.objectId) }
             )
         case .cave:
             CaveButtonExpandedView(onSelect: { select($0) })

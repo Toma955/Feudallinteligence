@@ -6,7 +6,7 @@
 //  Rade samo kad je radnik unutra; svaki ciklus uzme ulaz (ako ga ima) i donese proizvod.
 //  Brzina ciklusa ovisi prvenstveno o godišnjem dobu.
 //  Farme i industrija proizvode sirovine; ostali ih uzimaju i rade proizvode
-//  (kuća mača: željezo → mač, luk i koplje: drvo; mlin: sijeno → brašno → pekara → kruh).
+//  (kuća mača: željezo → mač, luk i koplje: drvo; mlin: pšenica → brašno → pekara → kruh).
 //  Svaki proizvod ide u svoje skladište (StorageKind): oružje u oružarnicu (60), hrana u smočnicu (396), konji u štalu (5),
 //  sirovine i međuproizvodi u skladište (400). Sirovine se uzimaju iz skladišta; kad je puno, radnik čeka.
 //
@@ -17,10 +17,10 @@ import Foundation
 /// ostalo u GameState.goods.
 enum Good: String, CaseIterable, Codable {
     case stone, wood, iron, hop, beer, gold, food
-    case wheat, flour, bread, corn, eggs, apple, spirits, wine
+    case wheat, flour, bread, corn, eggs, apple, banana, spirits, wine
     case honey, wax, candle
     case vegetables, grapes, spices, flowers
-    case meat, sausages, milk, cheese, wool, hay
+    case meat, chicken, sausages, milk, cheese, wool, hay
     case sword, shield, bow, spear, leather
     case horse
 
@@ -39,6 +39,7 @@ enum Good: String, CaseIterable, Codable {
         case .corn: return "kukuruz"
         case .eggs: return "jaja"
         case .apple: return "jabuke"
+        case .banana: return "banane"
         case .spirits: return "rakija"
         case .wine: return "vino"
         case .honey: return "med"
@@ -49,6 +50,7 @@ enum Good: String, CaseIterable, Codable {
         case .spices: return "začini"
         case .flowers: return "cvijeće"
         case .meat: return "meso"
+        case .chicken: return "piletina"
         case .sausages: return "kobasice"
         case .milk: return "mlijeko"
         case .cheese: return "sir"
@@ -122,16 +124,16 @@ enum WorkCycleCatalog {
         case Vegetables.objectId: return WorkCycle(kind: .field, durationTicks: 18, inputs: [:], outputs: [.vegetables: 3])
         case Grapes.objectId: return WorkCycle(kind: .field, durationTicks: 22, inputs: [:], outputs: [.grapes: 3])
         case Spices.objectId: return WorkCycle(kind: .field, durationTicks: 24, inputs: [:], outputs: [.spices: 2])
-        case Flower.objectId: return WorkCycle(kind: .field, durationTicks: 16, inputs: [:], outputs: [.flowers: 2])
-        case AppleOrchard.objectId: return WorkCycle(kind: .field, durationTicks: 22, inputs: [:], outputs: [.food: 1])
-        case Chicken.objectId: return WorkCycle(kind: .animal, durationTicks: 15, inputs: [:], outputs: [.eggs: 2])
-        case Hive.objectId: return WorkCycle(kind: .animal, durationTicks: 20, inputs: [:], outputs: [.honey: 2, .wax: 1])
+        // Cvijeće: gredice + košnice — med, vosak i svijeće (nema zasebne svijećarnice).
+        case Flower.objectId: return WorkCycle(kind: .field, durationTicks: 18, inputs: [:], outputs: [.flowers: 2, .honey: 2, .wax: 1, .candle: 2])
+        case AppleOrchard.objectId: return WorkCycle(kind: .field, durationTicks: 22, inputs: [:], outputs: [.apple: 3])
+        case Chicken.objectId: return WorkCycle(kind: .animal, durationTicks: 15, inputs: [:], outputs: [.eggs: 2, .chicken: 1])
         case Pig.objectId: return WorkCycle(kind: .animal, durationTicks: 22, inputs: [:], outputs: [.meat: 2, .sausages: 1])
         case Cow.objectId: return WorkCycle(kind: .animal, durationTicks: 20, inputs: [:], outputs: [.milk: 2, .cheese: 1, .leather: 1])
         case Sheep.objectId: return WorkCycle(kind: .animal, durationTicks: 18, inputs: [:], outputs: [.wool: 2, .milk: 1])
         // Hrana
         case Food.objectId: return WorkCycle(kind: .food, durationTicks: 12, inputs: [:], outputs: [.food: 2])
-        case Windmill.objectId: return WorkCycle(kind: .food, durationTicks: 10, inputs: [.hay: 2], outputs: [.flour: 2])
+        case Windmill.objectId: return WorkCycle(kind: .food, durationTicks: 10, inputs: [.wheat: 2], outputs: [.flour: 2])
         case Bakery.objectId: return WorkCycle(kind: .food, durationTicks: 12, inputs: [.flour: 2], outputs: [.bread: 6])
         case Granary.objectId: return WorkCycle(kind: .food, durationTicks: 15, inputs: [.wheat: 3], outputs: [.food: 3])
         case Brewery.objectId: return WorkCycle(kind: .food, durationTicks: 10, inputs: [.hop: 2], outputs: [.beer: 2])
@@ -139,7 +141,6 @@ enum WorkCycleCatalog {
         case WineCellar.objectId: return WorkCycle(kind: .food, durationTicks: 30, inputs: [.grapes: 2], outputs: [.wine: 1])
         case Tavern.objectId: return WorkCycle(kind: .food, durationTicks: 6, inputs: [.beer: 1], outputs: [.gold: 2])
         case Canteen.objectId: return WorkCycle(kind: .food, durationTicks: 12, inputs: [.corn: 2, .eggs: 1], outputs: [.food: 5])
-        case CandleShop.objectId: return WorkCycle(kind: .food, durationTicks: 10, inputs: [.wax: 1], outputs: [.candle: 2])
         // Resursi
         case Iron.objectId: return WorkCycle(kind: .resource, durationTicks: 12, inputs: [:], outputs: [.iron: 2])
         case Stone.objectId: return WorkCycle(kind: .resource, durationTicks: 10, inputs: [:], outputs: [.stone: 3])

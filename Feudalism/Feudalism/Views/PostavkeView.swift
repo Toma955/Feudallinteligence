@@ -203,7 +203,7 @@ struct PostavkeSectionContent: View {
             Section {
                 Toggle("Zvuk postavljanja", isOn: $gameState.playPlacementSound)
                 Toggle("Zvuk izbornika", isOn: $gameState.playBarTransitionSound)
-                Text("Muzika mape: map_music.mp3 u bundleu. Intro: soundtrack.mp3.")
+                Text("Muzika mape: map_music. Intro: soundtrack. Vatra: Core/Audio/Fire (fire_start, fire_loop).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } header: { Text("Efekti") }

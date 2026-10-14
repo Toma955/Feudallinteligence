@@ -55,11 +55,12 @@ final class GameMap: ObservableObject {
 
     /// Svaka ćelija ima 4 točke (vrha); ne može se kreirati ćelija bez tih točaka. Inicijalizira sve vrhove mreže s elevacijom 0.
     /// Poziva se na pozadinskom threadu pri kreiranju mape.
-    static func makeInitialVertexHeights(rows: Int, cols: Int) -> [String: CGFloat] {
+    static func makeInitialVertexHeights(rows: Int, cols: Int, fill: CGFloat = 0) -> [String: CGFloat] {
         var h: [String: CGFloat] = [:]
+        let value = TerrainHeight.clamp(fill)
         for r in 0...rows {
             for c in 0...cols {
-                h["\(r)_\(c)"] = 0
+                h["\(r)_\(c)"] = value
             }
         }
         return h
@@ -67,15 +68,26 @@ final class GameMap: ObservableObject {
 
     /// Pri generiranju mape sve ćelije su gola zemlja.
     /// Poziva se na pozadinskom threadu pri kreiranju mape.
-    static func makeGrid(rows: Int, cols: Int) -> [String: MapCell] {
+    static func makeGrid(rows: Int, cols: Int, height: CGFloat = 0) -> [String: MapCell] {
         var result: [String: MapCell] = [:]
         for r in 0..<rows {
             for c in 0..<cols {
                 let coord = MapCoordinate(row: r, col: c)
-                result[coord.cellId] = MapCell(coordinate: coord, povrsina: .default)
+                result[coord.cellId] = MapCell(coordinate: coord, height: height, povrsina: .default)
             }
         }
         return result
+    }
+
+    /// Podzemni sloj istih dimenzija: 100 % popunjen (`UndergroundTerrain.filledHeight`).
+    static func makeFilledUnderground(rows: Int, cols: Int) -> GameMap {
+        let fill = UndergroundTerrain.filledHeight
+        return GameMap(
+            rows: rows,
+            cols: cols,
+            cells: makeGrid(rows: rows, cols: cols, height: fill),
+            vertexHeights: makeInitialVertexHeights(rows: rows, cols: cols, fill: fill)
+        )
     }
 
     /// Ćelija na koordinati (ako postoji).
@@ -138,10 +150,28 @@ final class GameMap: ObservableObject {
     }
 
     /// Postavi teren ćelije (pustinja, plodna, put, …) sa zadanim kretanjem i gradnjom.
-    func setSurface(at coordinate: MapCoordinate, _ surface: PovrsinaType) {
+    /// More se ne može obrisati ni prebrisati drugom podlogom.
+    /// `publish: false` za batch paint (npr. pravokutnik mora) — bez stotine objectWillChange.
+    func setSurface(at coordinate: MapCoordinate, _ surface: PovrsinaType, publish: Bool = true) {
         guard isValid(coordinate), var cell = cells[coordinate.cellId] else { return }
+        if cell.povrsina == .more, surface != .more { return }
         cell.applySurface(surface)
         cells[coordinate.cellId] = cell
+        if publish { objectWillChange.send() }
+    }
+
+    /// Podzemna ćelija: visina 10 (potpuno puno) + površina (more/rijeka/tlo). Kutovi na istoj visini.
+    func setUndergroundFill(at coordinate: MapCoordinate, surface: PovrsinaType, fillHeight: CGFloat = UndergroundTerrain.filledHeight) {
+        guard isValid(coordinate), var cell = cells[coordinate.cellId] else { return }
+        let h = TerrainHeight.clamp(fillHeight)
+        cell.applySurface(surface)
+        cell.height = h
+        cells[coordinate.cellId] = cell
+        for dr in 0...1 {
+            for dc in 0...1 {
+                setVertexHeight(vertexRow: coordinate.row + dr, vertexCol: coordinate.col + dc, h)
+            }
+        }
         objectWillChange.send()
     }
 
@@ -407,7 +437,10 @@ final class GameMap: ObservableObject {
 //   – generiraju se pri uključivanju editor moda i vežu na mapu.
 
 struct MapEditorSaveData: Codable {
-    enum CodingKeys: String, CodingKey { case mapName, rows, cols, placements, cells, createdDate, originOffsetX, originOffsetZ, vertexHeights, vertexOffsets, lordStarts, undergroundPlacements }
+    enum CodingKeys: String, CodingKey {
+        case mapName, rows, cols, placements, cells, createdDate, originOffsetX, originOffsetZ
+        case vertexHeights, vertexOffsets, lordStarts, undergroundPlacements, undergroundVertexHeights
+    }
     /// Ime mape (obavezno pri spremanju).
     let mapName: String
     let rows: Int
@@ -429,11 +462,14 @@ struct MapEditorSaveData: Codable {
     let lordStarts: [String: MapCoordinate]?
     /// Građevine podzemne mape (ista veličina kao nadzemna).
     let undergroundPlacements: [Placement]?
+    /// Visine podzemlja (10 = 100 % popunjeno). Nil na starim mapama → pri učitavanju puni se na 10.
+    let undergroundVertexHeights: [String: Double]?
 
-    init(mapName: String, rows: Int, cols: Int, placements: [Placement], cells: [String: MapCell]? = nil, createdDate: Date? = nil, originOffsetX: Double? = 0, originOffsetZ: Double? = 0, vertexHeights: [String: Double]? = nil, vertexOffsets: [String: [Double]]? = nil, lordStarts: [String: MapCoordinate]? = nil, undergroundPlacements: [Placement]? = nil) {
+    init(mapName: String, rows: Int, cols: Int, placements: [Placement], cells: [String: MapCell]? = nil, createdDate: Date? = nil, originOffsetX: Double? = 0, originOffsetZ: Double? = 0, vertexHeights: [String: Double]? = nil, vertexOffsets: [String: [Double]]? = nil, lordStarts: [String: MapCoordinate]? = nil, undergroundPlacements: [Placement]? = nil, undergroundVertexHeights: [String: Double]? = nil) {
         self.vertexOffsets = vertexOffsets
         self.lordStarts = lordStarts
         self.undergroundPlacements = undergroundPlacements
+        self.undergroundVertexHeights = undergroundVertexHeights
         self.mapName = mapName
         self.rows = rows
         self.cols = cols
@@ -459,6 +495,11 @@ struct MapEditorSaveData: Codable {
         vertexOffsets = try c.decodeIfPresent([String: [Double]].self, forKey: .vertexOffsets)
         lordStarts = try c.decodeIfPresent([String: MapCoordinate].self, forKey: .lordStarts)
         undergroundPlacements = try c.decodeIfPresent([Placement].self, forKey: .undergroundPlacements)
+        undergroundVertexHeights = try c.decodeIfPresent([String: Double].self, forKey: .undergroundVertexHeights)
+    }
+
+    static func encodeHeights(_ heights: [String: CGFloat]) -> [String: Double]? {
+        heights.isEmpty ? nil : Dictionary(uniqueKeysWithValues: heights.map { ($0.key, Double($0.value)) })
     }
 
     var lordStartSlots: [Int: MapCoordinate] {
@@ -494,5 +535,6 @@ struct MapEditorSaveData: Codable {
         try c.encodeIfPresent(vertexOffsets, forKey: .vertexOffsets)
         try c.encodeIfPresent(lordStarts, forKey: .lordStarts)
         try c.encodeIfPresent(undergroundPlacements, forKey: .undergroundPlacements)
+        try c.encodeIfPresent(undergroundVertexHeights, forKey: .undergroundVertexHeights)
     }
 }

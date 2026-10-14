@@ -22,7 +22,7 @@ enum WeaponYard {
         case bakery
     }
 
-    static func makeNode(name: String, craft: Craft, cells: Int = 5) -> SCNNode {
+    static func makeNode(name: String, craft: Craft, cells: Int = 4) -> SCNNode {
         let root = SCNNode()
         root.name = name
         addBase(to: root, cells: cells)

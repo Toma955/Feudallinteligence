@@ -1,0 +1,26 @@
+Core/Audio – gdje ide što
+=========================
+
+Format: .wav / .mp3 / .m4a
+Ime datoteke = ključ u kodu (bez razmaka, mala slova), npr. fire_loop.wav
+
+Music/          muzika (intro, mapa)
+  soundtrack      – intro
+  map_music       – petlja na mapi (dodaj kad imaš)
+
+UI/             sučelje
+  place           – postavljanje objekta
+  transition      – promjena kategorije u donjem baru
+
+Buildings/      građevine
+  destroying      – rušenje
+
+Fire/           vatra  ← tvoji fileovi ovdje
+  fire_start      – trenutak paljenja
+  fire_loop       – petlja dok nešto gori
+
+Seasons/        ambijent godišnjih doba
+Nature/         priroda (voda, vjetar, šuma…)
+Combat/         borba
+People/         ljudi / koraci / govor (kasnije)
+Problems/hr|en  govorene poruke o greškama (vidi Problems/README.txt)

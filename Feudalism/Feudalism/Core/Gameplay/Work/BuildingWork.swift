@@ -41,6 +41,12 @@ struct BuildingState: Codable, Equatable {
     var chopProgress: Double = 0
     /// Potezi piljenja za trenutno deblo (iz stabla).
     var sawTicks: Int?
+    /// Faza usjeva na polju (sjetva / rast / berba). Životinje ne koriste.
+    var fieldPhase: FieldPhase = .fallow
+    /// Mlin: melje pšenicu ili kukuruz u brašno.
+    var millGrain: MillGrain = .wheat
+    /// Protok izvora (jedinice/potez). Izvor je nepromjenjiv; mijenja se samo protok.
+    var springFlow: Double = UndergroundTerrain.defaultSpringFlow
 
     var hasWorkerInside: Bool { worker == .inside }
     var isOccupied: Bool { worker != .none }
@@ -48,7 +54,7 @@ struct BuildingState: Codable, Equatable {
     init() {}
 
     enum CodingKeys: String, CodingKey {
-        case worker, progress, cyclesCompleted, isOnFire, isClosed, waitingForInput, waitingForStorage, waitingForCandle, pendingOutputs, dropOffId, fetchingInputs, fetchedInputs, haulGood, waitingForTree, targetTreeId, chopProgress, sawTicks
+        case worker, progress, cyclesCompleted, isOnFire, isClosed, waitingForInput, waitingForStorage, waitingForCandle, pendingOutputs, dropOffId, fetchingInputs, fetchedInputs, haulGood, waitingForTree, targetTreeId, chopProgress, sawTicks, fieldPhase, millGrain, springFlow
     }
 
     init(from decoder: Decoder) throws {
@@ -70,6 +76,9 @@ struct BuildingState: Codable, Equatable {
         targetTreeId = try c.decodeIfPresent(String.self, forKey: .targetTreeId)
         chopProgress = try c.decodeIfPresent(Double.self, forKey: .chopProgress) ?? 0
         sawTicks = try c.decodeIfPresent(Int.self, forKey: .sawTicks)
+        fieldPhase = try c.decodeIfPresent(FieldPhase.self, forKey: .fieldPhase) ?? .fallow
+        millGrain = try c.decodeIfPresent(MillGrain.self, forKey: .millGrain) ?? .wheat
+        springFlow = try c.decodeIfPresent(Double.self, forKey: .springFlow) ?? UndergroundTerrain.defaultSpringFlow
     }
 
     func encode(to encoder: Encoder) throws {
@@ -91,6 +100,50 @@ struct BuildingState: Codable, Equatable {
         try c.encodeIfPresent(targetTreeId, forKey: .targetTreeId)
         try c.encode(chopProgress, forKey: .chopProgress)
         try c.encodeIfPresent(sawTicks, forKey: .sawTicks)
+        try c.encode(fieldPhase, forKey: .fieldPhase)
+        try c.encode(millGrain, forKey: .millGrain)
+        try c.encode(springFlow, forKey: .springFlow)
+    }
+}
+
+/// Što mlin melje u brašno.
+enum MillGrain: String, Codable, Equatable, CaseIterable {
+    case wheat
+    case corn
+
+    var input: Good {
+        switch self {
+        case .wheat: return .wheat
+        case .corn: return .corn
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .wheat: return "Pšenica"
+        case .corn: return "Kukuruz"
+        }
+    }
+}
+
+/// Kalendar usjeva na polju (ne za svinju/kravu/ovcu).
+enum FieldPhase: String, Codable, Equatable {
+    /// Zima / čekanje iduće sjetve.
+    case fallow
+    /// Proljeće – sije.
+    case sowing
+    /// Ljeto – usjev raste.
+    case growing
+    /// Jesen – bere, zatim nosi u skladište.
+    case harvesting
+
+    var displayName: String {
+        switch self {
+        case .fallow: return "Ugar"
+        case .sowing: return "Sjetva"
+        case .growing: return "Rast"
+        case .harvesting: return "Berba"
+        }
     }
 }
 
@@ -144,9 +197,16 @@ enum StorageKind: String, CaseIterable, Codable {
     var goods: Set<Good> {
         switch self {
         case .armory: return [.sword, .shield, .bow, .spear, .leather]
-        case .pantry: return [.bread, .apple, .hop, .eggs, .honey, .vegetables, .meat, .sausages, .milk, .cheese]
+        /// Hrana za jelo — kruh, meso, voće, povrće, jaja… (ne hmelj / brašno / kukuruz).
+        case .pantry: return [
+            .bread, .apple, .banana, .eggs, .honey, .vegetables, .grapes,
+            .meat, .chicken, .sausages, .milk, .cheese
+        ]
         case .foodHall: return [.food]
-        case .warehouse: return [.stone, .wood, .iron, .beer, .wheat, .flour, .corn, .spirits, .wine, .wax, .candle, .grapes, .spices, .flowers, .wool, .hay]
+        case .warehouse: return [
+            .stone, .wood, .iron, .hop, .beer, .wheat, .flour, .corn, .spirits, .wine,
+            .wax, .candle, .spices, .flowers, .wool, .hay
+        ]
         case .stable: return [.horse]
         }
     }
@@ -201,6 +261,31 @@ enum StorageKind: String, CaseIterable, Codable {
 }
 
 extension GameState {
+    /// Ciklus građevine; mlin bira pšenicu ili kukuruz prema `millGrain`.
+    func workCycle(for placement: Placement, millGrain: MillGrain? = nil) -> WorkCycle? {
+        guard let base = WorkCycleCatalog.cycle(for: placement.objectId) else { return nil }
+        guard placement.objectId == Windmill.objectId else { return base }
+        let grain = millGrain ?? buildingStates[placement.id]?.millGrain ?? .wheat
+        let amount = base.inputs.values.first ?? 2
+        return WorkCycle(kind: base.kind, durationTicks: base.durationTicks, inputs: [grain.input: amount], outputs: base.outputs)
+    }
+
+    func setMillGrain(placementId: String, grain: MillGrain) {
+        guard locatePlacement(id: placementId)?.placement.objectId == Windmill.objectId else { return }
+        var state = buildingStates[placementId] ?? BuildingState()
+        guard state.millGrain != grain else { return }
+        state.millGrain = grain
+        // Sljedeći ciklus uzima novo zrno; tekući (već uzet ulaz) se ne dira.
+        if state.progress == 0, !state.fetchedInputs {
+            state.fetchingInputs = false
+            state.waitingForInput = false
+            state.haulGood = nil
+        }
+        buildingStates[placementId] = state
+        refreshBuildingAlerts()
+        objectWillChange.send()
+    }
+
     /// Radnici igrača (za HUD): seljaci (slobodni) i radnici (imaju posao). Vojnici ne rade.
     var totalWorkers: Int {
         guard let seat = playerSeat else { return 0 }
@@ -323,21 +408,35 @@ extension GameState {
     @discardableResult
     func ignite(placementId: String) -> Bool {
         guard let (_, p) = locatePlacement(id: placementId), !p.isDestroyed, isFlammable(p) else { return false }
+        let already = buildingStates[placementId]?.isOnFire == true
         var state = buildingStates[placementId] ?? BuildingState()
         state.isOnFire = true
         state.worker = .none
         buildingStates[placementId] = state
         releaseWorker(of: placementId)
+        syncFireAmbience(playIgnite: !already)
         return true
     }
 
     func extinguish(placementId: String) {
         buildingStates[placementId]?.isOnFire = false
+        syncFireAmbience()
+    }
+
+    /// Barem jedna građevina gori → petlja vatre; inače stani.
+    func syncFireAmbience(playIgnite: Bool = false) {
+        let burning = buildingStates.values.contains(where: \.isOnFire)
+        AudioManager.shared.syncFireAmbience(
+            burning: burning && !isGamePaused && !isShowingMainMenu,
+            volume: effectiveSoundsVolume,
+            playIgnite: playIgnite
+        )
     }
 
     /// Spavanje: radnik se vraća vatri kao seljak, a novi ne dolazi dok se građevina ne probudi.
     /// Započeti ciklus ostaje i nastavlja se nakon buđenja. Skladište na buđenju ponovno uzme skladištara.
     func setWorkplaceClosed(placementId: String, closed: Bool) {
+        if let p = locatePlacement(id: placementId)?.placement, p.objectId == Lager.objectId { return }
         var state = buildingStates[placementId] ?? BuildingState()
         state.isClosed = closed
         if closed {
@@ -356,9 +455,10 @@ extension GameState {
         objectWillChange.send()
     }
 
-    /// Farme, industrija, hrana, oružje i skladišta s radnikom / skladištarom.
+    /// Farme, industrija, hrana, oružje i skladišta s radnikom / skladištarom. Skladište (lager) ne spava.
     func hasSleepButton(for placement: Placement) -> Bool {
-        WorkCycleCatalog.isWorkplace(placement.objectId)
+        if placement.objectId == Lager.objectId { return false }
+        return WorkCycleCatalog.isWorkplace(placement.objectId)
             || StorageKind.of(buildingId: placement.objectId) != nil
             || worker(of: placement.id) != nil
     }
@@ -402,114 +502,163 @@ extension GameState {
         ensureBuildingBirth(for: all.map(\.placement.id))
         let byAge = all.sorted { buildingBirthRank($0.placement.id) < buildingBirthRank($1.placement.id) }
         for (layer, p) in byAge {
-            guard let cycle = WorkCycleCatalog.cycle(for: p.objectId) else { continue }
             var state = states[p.id] ?? BuildingState()
+            guard let cycle = workCycle(for: p, millGrain: state.millGrain) ?? WorkCycleCatalog.cycle(for: p.objectId) else { continue }
             guard !state.isOnFire, !p.isDestroyed, let faction = owner(of: p) else { continue }
             if p.objectId == Wood.objectId {
                 tickWoodcutter(placement: p, layer: layer, cycle: cycle, state: &state, season: season, faction: faction, room: &room)
                 states[p.id] = state
                 continue
             }
-
-            let person = worker(of: p.id)
-            if state.worker != .none, person == nil { state.worker = .none }
-            if let person {
-                switch person.activity {
-                case .working: state.worker = .inside
-                case .walkingToWork, .delivering, .fetching, .returningToWork:
-                    state.worker = .walking(ticksLeft: ticksUntilArrival(person))
-                default: break
-                }
+            if cycle.kind == .field {
+                tickFieldFarm(placement: p, layer: layer, cycle: cycle, state: &state, season: season, faction: faction, room: &room)
+                states[p.id] = state
+                continue
             }
 
-            switch state.worker {
-            case .none:
-                if !state.isClosed, hasPath(to: p, layer: layer), let assigned = assignWorker(to: p) {
-                    state.worker = .walking(ticksLeft: ticksUntilArrival(assigned))
+            let needed = workersRequired(for: p.objectId)
+            let producersNeeded = producersRequired(for: p.objectId)
+            var crew = workers(of: p.id)
+            if !state.isClosed, hasPath(to: p, layer: layer) {
+                while crew.count < needed, let assigned = assignWorker(to: p) {
+                    crew.append(assigned)
                 }
-            case .walking:
-                if !hasPath(to: p, layer: layer) {
-                    releaseWorker(of: p.id)
-                    state.worker = .none
-                } else if let person {
-                    state.worker = .walking(ticksLeft: ticksUntilArrival(person))
+            }
+            if !hasPath(to: p, layer: layer), !crew.isEmpty {
+                releaseWorker(of: p.id)
+                crew = []
+            }
+            let inside = crew.filter {
+                if case .working = $0.activity { return true }
+                return false
+            }
+            let enRoute = crew.filter {
+                switch $0.activity {
+                case .walkingToWork, .delivering, .fetching, .returningToWork,
+                     .walkingToTree, .chopping, .haulingLog, .walkingToField, .workingField:
+                    return true
+                default: return false
                 }
-            case .inside:
-                if CandleRules.needsCandle(objectId: p.objectId, layer: layer), !CandleRules.hasCandles(self, faction) {
-                    state.waitingForCandle = true
-                    break
-                }
-                state.waitingForCandle = false
-                if state.progress == 0 {
-                    if cycle.outputs.keys.contains(where: { StorageKind.of($0) != nil }) {
-                        let dest = deliveryDestination(for: p, outputs: cycle.outputs, faction: faction)
-                        state.waitingForStorage = dest == nil || (dest?.objectId != Carriage.objectId && missingStorage(for: cycle.outputs, of: faction) != nil)
-                        if state.waitingForStorage { break }
+            }
+            if crew.isEmpty {
+                state.worker = .none
+            } else if inside.count >= producersNeeded {
+                state.worker = .inside
+            } else if let walker = enRoute.first {
+                state.worker = .walking(ticksLeft: ticksUntilArrival(walker))
+            } else if !inside.isEmpty {
+                state.worker = .inside
+            } else {
+                state.worker = .none
+            }
+
+            // Proizvodnja ide kad je proizvođač unutra; kurir smije biti na putu.
+            guard inside.count >= producersNeeded else {
+                states[p.id] = state
+                continue
+            }
+            if CandleRules.needsCandle(objectId: p.objectId, layer: layer), !CandleRules.hasCandles(self, faction) {
+                state.waitingForCandle = true
+                states[p.id] = state
+                continue
+            }
+            state.waitingForCandle = false
+            // Kurir još nije vratio sirovinu — ne troši i ne melje.
+            if state.fetchingInputs {
+                states[p.id] = state
+                continue
+            }
+            if state.progress == 0, state.pendingOutputs.isEmpty {
+                if cycle.outputs.keys.contains(where: { StorageKind.of($0) != nil }) {
+                    let dest = deliveryDestination(for: p, outputs: cycle.outputs, faction: faction)
+                    state.waitingForStorage = dest == nil || (dest?.objectId != Carriage.objectId && missingStorage(for: cycle.outputs, of: faction) != nil)
+                    if state.waitingForStorage {
+                        states[p.id] = state
+                        continue
                     }
                 }
-                let hasInputs = cycle.inputs.allSatisfy { goodAmount($0.key, of: faction) >= $0.value }
-                if state.progress == 0, !state.fetchedInputs, !hasInputs {
-                    state.waitingForInput = true
-                    break
+            }
+            let hasInputs = cycle.inputs.allSatisfy { goodAmount($0.key, of: faction) >= $0.value }
+            if state.progress == 0, !state.fetchedInputs, !hasInputs {
+                state.waitingForInput = true
+                states[p.id] = state
+                continue
+            }
+            let needsPickup = state.progress == 0 && !state.fetchedInputs && !cycle.inputs.isEmpty
+                && pickupStore(for: p, inputs: cycle.inputs, faction: faction) != nil
+            if needsPickup,
+               let store = pickupStore(for: p, inputs: cycle.inputs, faction: faction),
+               let good = cycle.inputs.keys.first(where: { storeSlotExists(storeId: store.id, good: $0) }) {
+                guard let courier = pickCourier(of: p.id, keepInside: producersNeeded) else {
+                    // Čekaj slobodnog kurira (ne šalji jedinog proizvođača).
+                    states[p.id] = state
+                    continue
                 }
-                if state.progress == 0, !state.fetchedInputs, !cycle.inputs.isEmpty,
-                   let store = pickupStore(for: p, inputs: cycle.inputs, faction: faction),
-                   let good = cycle.inputs.keys.first(where: { storeSlotExists(storeId: store.id, good: $0) }),
-                   let person {
-                    state.fetchingInputs = true
-                    state.haulGood = good
-                    state.dropOffId = store.id
-                    sendWorkerToFetch(from: p, to: store, personId: person.id, good: good)
-                    state.worker = .walking(ticksLeft: ticksUntilArrival(person))
-                    break
-                }
-                if state.progress == 0, !state.fetchedInputs {
-                    for (good, amount) in cycle.inputs { addGood(good, -amount, to: faction) }
-                    state.fetchedInputs = true
-                }
-                state.waitingForInput = false
-                state.progress += cycle.kind.seasonFactor(season)
-                if state.progress >= Double(cycle.durationTicks) {
-                    if cycle.outputs.keys.allSatisfy({ StorageKind.of($0) == nil }) {
-                        for (good, amount) in cycle.outputs { addGood(good, amount, to: faction) }
-                        state.progress = 0
-                        state.fetchedInputs = false
-                        state.waitingForStorage = false
-                        state.cyclesCompleted += 1
-                        break
-                    }
-                    let needs = Self.storageNeeds(cycle.outputs)
-                    let free = freeRoom(faction)
-                    guard let dest = deliveryDestination(for: p, outputs: cycle.outputs, faction: faction),
-                          let person else {
-                        state.progress = Double(cycle.durationTicks)
-                        state.waitingForStorage = true
-                        break
-                    }
-                    if dest.objectId == Carriage.objectId {
-                        let amount = cycle.outputs.values.reduce(0, +)
-                        guard (transportLines[dest.id]?.freeRoom ?? 0) >= amount else {
-                            state.progress = Double(cycle.durationTicks)
-                            state.waitingForStorage = true
-                            break
-                        }
-                    } else {
-                        guard needs.allSatisfy({ $0.value <= free[$0.key, default: 0] }) else {
-                            state.progress = Double(cycle.durationTicks)
-                            state.waitingForStorage = true
-                            break
-                        }
-                        for (kind, amount) in needs { room[faction]?[kind, default: 0] -= amount }
-                    }
-                    state.pendingOutputs = cycle.outputs
-                    state.haulGood = cycle.outputs.keys.sorted { $0.rawValue < $1.rawValue }.first
-                    state.dropOffId = dest.id
+                state.fetchingInputs = true
+                state.haulGood = good
+                state.dropOffId = store.id
+                sendWorkerToFetch(from: p, to: store, personId: courier.id, good: good)
+                state.worker = .walking(ticksLeft: ticksUntilArrival(courier))
+                states[p.id] = state
+                continue
+            }
+            if state.progress == 0, !state.fetchedInputs {
+                for (good, amount) in cycle.inputs { addGood(good, -amount, to: faction) }
+                state.fetchedInputs = true
+            }
+            state.waitingForInput = false
+            // Gotov ciklus čeka kurira s prethodnim tovarom — ne kreni novi output preko starog.
+            if state.progress >= Double(cycle.durationTicks), !state.pendingOutputs.isEmpty {
+                state.progress = Double(cycle.durationTicks)
+                states[p.id] = state
+                continue
+            }
+            state.progress += cycle.kind.seasonFactor(season)
+            if state.progress >= Double(cycle.durationTicks) {
+                if cycle.outputs.keys.allSatisfy({ StorageKind.of($0) == nil }) {
+                    for (good, amount) in cycle.outputs { addGood(good, amount, to: faction) }
                     state.progress = 0
                     state.fetchedInputs = false
                     state.waitingForStorage = false
                     state.cyclesCompleted += 1
-                    sendWorkerToDeliver(from: p, to: dest, personId: person.id)
-                    state.worker = .walking(ticksLeft: ticksUntilArrival(person))
+                } else {
+                    let needs = Self.storageNeeds(cycle.outputs)
+                    let free = freeRoom(faction)
+                    let dest = deliveryDestination(for: p, outputs: cycle.outputs, faction: faction)
+                    let courier = pickCourier(of: p.id, keepInside: producersNeeded)
+                    if let dest {
+                        let canDeliver: Bool
+                        if dest.objectId == Carriage.objectId {
+                            let amount = cycle.outputs.values.reduce(0, +)
+                            canDeliver = (transportLines[dest.id]?.freeRoom ?? 0) >= amount
+                        } else {
+                            canDeliver = needs.allSatisfy { $0.value <= free[$0.key, default: 0] }
+                            if canDeliver {
+                                for (kind, amount) in needs { room[faction]?[kind, default: 0] -= amount }
+                            }
+                        }
+                        if canDeliver, let courier {
+                            state.pendingOutputs = cycle.outputs
+                            state.haulGood = cycle.outputs.keys.sorted { $0.rawValue < $1.rawValue }.first
+                            state.dropOffId = dest.id
+                            state.progress = 0
+                            state.fetchedInputs = false
+                            state.waitingForStorage = false
+                            state.cyclesCompleted += 1
+                            sendWorkerToDeliver(from: p, to: dest, personId: courier.id)
+                            state.worker = .walking(ticksLeft: ticksUntilArrival(courier))
+                        } else if canDeliver {
+                            // Proizvod gotov, kurir još na putu — drži ciklus dok se ne vrati.
+                            state.progress = Double(cycle.durationTicks)
+                            state.waitingForStorage = false
+                        } else {
+                            state.progress = Double(cycle.durationTicks)
+                            state.waitingForStorage = true
+                        }
+                    } else {
+                        state.progress = Double(cycle.durationTicks)
+                        state.waitingForStorage = true
+                    }
                 }
             }
             states[p.id] = state
@@ -518,5 +667,6 @@ extension GameState {
         buildingStates = states
         if damaged { bumpPlacementsVersion() }
         refreshBuildingAlerts()
+        if damaged { syncFireAmbience() }
     }
 }

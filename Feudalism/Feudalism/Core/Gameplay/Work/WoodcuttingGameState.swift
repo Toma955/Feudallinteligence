@@ -111,9 +111,13 @@ extension GameState {
         let left = max(1, Int((Double(yield.cutTicks) - state.chopProgress).rounded(.up)))
         state.worker = .walking(ticksLeft: left)
         guard state.chopProgress >= Double(yield.cutTicks), let person else { return }
-        state.pendingOutputs = [.wood: yield.planks]
-        state.sawTicks = yield.sawTicks
-        state.haulGood = .wood
+        var cargo: [Good: Int] = [:]
+        if yield.planks > 0 { cargo[.wood] = yield.planks }
+        if yield.bananas > 0 { cargo[.banana] = yield.bananas }
+        if cargo.isEmpty { cargo[.wood] = 1 }
+        state.pendingOutputs = cargo
+        state.sawTicks = yield.bananas > 0 && yield.planks == 0 ? max(0, yield.sawTicks) : yield.sawTicks
+        state.haulGood = yield.bananas > 0 && yield.planks == 0 ? .banana : .wood
         fellTree(tree)
         state.targetTreeId = nil
         state.chopProgress = 0
@@ -137,8 +141,13 @@ extension GameState {
             state.waitingForStorage = dest == nil || (dest?.objectId != Carriage.objectId && missingStorage(for: outputs, of: faction) != nil)
             if state.waitingForStorage { return }
             let saw = Double(state.sawTicks ?? cycle.durationTicks)
-            state.progress += WorkKind.resource.seasonFactor(season)
-            guard state.progress >= saw else { return }
+            // Banane s palme: kratko sortiranje (saw≈0/1), bez piljenja dasaka.
+            if saw <= 0 {
+                state.progress = 0
+            } else {
+                state.progress += WorkKind.resource.seasonFactor(season)
+                guard state.progress >= saw else { return }
+            }
             guard let dest, let person else {
                 state.progress = saw
                 state.waitingForStorage = true

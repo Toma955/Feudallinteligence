@@ -1,0 +1,10 @@
+{
+  "_upute": "Koliko radnika treba građevina. zadano = sve što nije navedeno. Kod 2+ s dohvatom/dostavom jedan je kurir (proizvodnja ide dok je barem proizvođač unutra).",
+  "zadano": 1,
+  "gradevine": {
+    "object_stone": 3,
+    "object_iron": 2,
+    "object_windmill": 2,
+    "object_wood": 1
+  }
+}

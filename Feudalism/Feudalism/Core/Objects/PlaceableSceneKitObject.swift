@@ -52,7 +52,6 @@ enum PlaceableSceneKitTypes {
         Chicken.self,
         Corn.self,
         Hop.self,
-        Hive.self,
         Vegetables.self,
         Grapes.self,
         Spices.self,
@@ -61,6 +60,8 @@ enum PlaceableSceneKitTypes {
         Pig.self,
         Cow.self,
         Sheep.self,
+        // Stare mape: više se ne grade, ali se još učitavaju.
+        Hive.self,
         CandleShop.self,
         Sword.self,
         Shield.self,

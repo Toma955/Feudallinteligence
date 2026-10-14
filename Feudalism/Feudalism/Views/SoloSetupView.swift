@@ -56,6 +56,7 @@ struct SoloSetupView: View {
     @State private var initialBeer: Int = 0
     @State private var initialApple: Int = 0
     @State private var initialBanana: Int = 0
+    @State private var initialHoney: Int = 0
     @State private var initialCandle: Int = 0
     @State private var initialFlowers: Int = 0
     @State private var initialLeather: Int = 0
@@ -368,6 +369,7 @@ struct SoloSetupView: View {
         add("cheese_resource", "square.fill", initialCheese, .cheese)
         add("beer_resource", "mug.fill", initialBeer, .beer)
         add("apple_resource", "apple.logo", initialApple, .apple)
+        add("honey_resource", "drop.fill", initialHoney, .honey)
         add("vegetables_resource", "carrot.fill", initialVegetables, .vegetables)
         add("spices_resources", "leaf.fill", initialSpices, .spices)
         add("candle_resource", "flame.fill", initialCandle, .candle)
@@ -403,6 +405,7 @@ struct SoloSetupView: View {
             ("beer_resource", $initialBeer, "mug.fill"),
             ("apple_resource", $initialApple, "apple.logo"),
             ("banana_resource", $initialBanana, "leaf.fill"),
+            ("honey_resource", $initialHoney, "drop.fill"),
             ("vegetables_resource", $initialVegetables, "carrot.fill"),
             ("spices_resources", $initialSpices, "leaf.fill"),
             ("candle_resource", $initialCandle, "flame.fill"),

@@ -2,7 +2,7 @@
 //  Corn.swift
 //  Feudalism
 //
-//  Privremeni placeholder: kukuruz 2×2, visina 1. Kasnije zamijeniti stvarnim modelom.
+//  Kukuruz – farmYard 5×5 s usjevom klipova.
 //
 
 import Foundation
@@ -19,7 +19,7 @@ enum Corn: PlaceableSceneKitObject {
     }
 
     static func loadSceneKitNode(from bundle: Bundle = .main) -> SCNNode? {
-        FarmYard.makeNode(name: "corn", field: NSColor(red: 0.85, green: 0.75, blue: 0.2, alpha: 1))
+        FarmYard.makeNode(name: "corn", crop: .corn)
     }
 
     static func reapplyTexture(to node: SCNNode, bundle: Bundle = .main) -> Bool { true }

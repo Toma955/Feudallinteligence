@@ -4,7 +4,7 @@
 //
 //  Svaka mapa ima tri mape:
 //  1. nadzemnu (`GameState.gameMap`) – 3D prikaz kad se igra s grafikom,
-//  2. podzemnu (`GameState.undergroundMap`) – 3D prikaz, istih dimenzija, 10 m ispod,
+//  2. podzemnu (`GameState.undergroundMap`) – istih dimenzija; visina 10 = 100 % popunjeno (simbioza s nadzemljem na 0),
 //  3. logičku (`MapLogic`) – nadzemna i podzemna zajedno kao goli podaci, bez SceneKita i SwiftUI-ja.
 //     AI lordovi i simulator rade samo nad njom; grafika je samo sloj iznad.
 //

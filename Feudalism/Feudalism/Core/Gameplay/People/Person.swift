@@ -25,6 +25,21 @@ enum PersonRole: String, Codable, CaseIterable {
     }
 }
 
+/// Posao na polju (sjetva / njega / berba) – sinkroniziran s godišnjim dobom.
+enum FieldTask: String, Codable, Equatable {
+    case sowing
+    case tending
+    case harvesting
+
+    var displayName: String {
+        switch self {
+        case .sowing: return "sije"
+        case .tending: return "okopava"
+        case .harvesting: return "bere"
+        }
+    }
+}
+
 enum PersonActivity: Codable, Equatable {
     /// Seljak stoji na svom mjestu oko vatre.
     case atFire
@@ -42,6 +57,10 @@ enum PersonActivity: Codable, Equatable {
     case chopping(hutId: String, treeId: String)
     /// Nosi deblo natrag u kućicu.
     case haulingLog(hutId: String, treeId: String)
+    /// Ide na polje farme (sjetva / berba).
+    case walkingToField(placementId: String, task: FieldTask)
+    /// Radi na polju – vidi se i hoda među usjevima.
+    case workingField(placementId: String, task: FieldTask)
     case soldierMoving
     case soldierIdle
     /// Nesretna osoba napušta dvorac; kad stigne do ruba, nestaje.
@@ -52,13 +71,16 @@ enum PersonActivity: Codable, Equatable {
         case .walkingToWork(let id), .working(let id), .returningToWork(let id): return id
         case .delivering(let fromId, _), .fetching(let fromId, _): return fromId
         case .walkingToTree(let hutId, _), .chopping(let hutId, _), .haulingLog(let hutId, _): return hutId
+        case .walkingToField(let id, _), .workingField(let id, _): return id
         default: return nil
         }
     }
 
     var isMoving: Bool {
         switch self {
-        case .returningToFire, .walkingToWork, .delivering, .fetching, .returningToWork, .walkingToTree, .haulingLog, .soldierMoving, .leaving: return true
+        case .returningToFire, .walkingToWork, .delivering, .fetching, .returningToWork,
+             .walkingToTree, .haulingLog, .walkingToField, .soldierMoving, .leaving:
+            return true
         default: return false
         }
     }
@@ -108,6 +130,12 @@ struct Person: Codable, Identifiable, Equatable {
     var isVisible: Bool {
         if case .working = activity { return false }
         return healthPercent > 0
+    }
+
+    /// Na polju: animacija rada iako putanja stoji.
+    var isFieldWorking: Bool {
+        if case .workingField = activity { return true }
+        return false
     }
 
     var displayName: String {

@@ -2,7 +2,7 @@
 //  HarvestTrees.swift
 //  Feudalism
 //
-//  Stabla koja sječar može posjeći. Vrijeme sječe/pile i broj dasaka kasnije podešavamo ovdje.
+//  Stabla koja sječar može posjeći. Broj dasaka i trajanje: tree_yields.json (TreeYieldNotebook).
 //
 
 import Foundation
@@ -17,24 +17,25 @@ enum HarvestTrees {
     struct Yield: Equatable {
         /// Potezi sječe na stablu.
         var cutTicks: Int
-        /// Potezi piljenja u kućici.
+        /// Potezi piljenja u kućici (palme: kratko, bez dasaka).
         var sawTicks: Int
         /// Daske koje idu u skladište.
         var planks: Int
+        /// Banane s divlje palme → smočnica.
+        var bananas: Int
+    }
+
+    static func isPalm(_ objectId: String) -> Bool {
+        objectId == Palm.objectId
     }
 
     static func isTree(_ objectId: String) -> Bool {
         objectIds.contains(objectId)
     }
 
+    /// Po vrsti stabla (bilježnica). Tok: sječa → deblo kući → pila → daske u skladište.
     static func yield(for objectId: String) -> Yield {
-        switch objectId {
-        case Oak.objectId: return Yield(cutTicks: 12, sawTicks: 8, planks: 6)
-        case Fir.objectId: return Yield(cutTicks: 10, sawTicks: 6, planks: 4)
-        case Cypress.objectId: return Yield(cutTicks: 9, sawTicks: 6, planks: 3)
-        case Palm.objectId: return Yield(cutTicks: 8, sawTicks: 5, planks: 3)
-        default: return Yield(cutTicks: 8, sawTicks: 6, planks: 3)
-        }
+        TreeYieldNotebook.yield(for: objectId)
     }
 
     static func material(_ color: NSColor, roughness: CGFloat = 0.9) -> SCNMaterial {

@@ -66,7 +66,6 @@ enum PriceList {
         case Farm.objectId, Hop.objectId, Vegetables.objectId, Grapes.objectId, Spices.objectId, Flower.objectId, AppleOrchard.objectId: return Price(wood: 0)
         case Corn.objectId: return Price(wood: 0)
         case Chicken.objectId, Pig.objectId, Cow.objectId, Sheep.objectId: return Price(wood: 0, gold: 0)
-        case Hive.objectId: return Price(wood: 0)
         // Hrana
         case Food.objectId: return Price(wood: 0)
         case Windmill.objectId: return Price(stone: 0, wood: 0)
@@ -78,7 +77,6 @@ enum PriceList {
         case Tavern.objectId: return Price(wood: 0, gold: 0)
         case Smocnica.objectId: return Price(wood: 0)
         case Canteen.objectId: return Price(wood: 0, gold: 0)
-        case CandleShop.objectId: return Price(wood: 0)
         // Industrija
         case Wood.objectId: return Price(gold: 0)
         case Stone.objectId, SmallRock.objectId, MediumRock.objectId, LargeRock.objectId: return Price(wood: 0)

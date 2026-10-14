@@ -44,6 +44,7 @@ enum MapFileManager {
         let rows = MapCreationRules.rows(forPresetSide: side)
         let cols = MapCreationRules.cols(forPresetSide: side)
         let gameMap = GameMap(rows: rows, cols: cols)
+        let underground = GameMap.makeFilledUnderground(rows: rows, cols: cols)
         let fileName = MapStorage.fileName(forMapName: nameTrimmed, slotFallback: slot)
         let data = MapEditorSaveData(
             mapName: nameTrimmed,
@@ -53,7 +54,9 @@ enum MapFileManager {
             cells: gameMap.cells,
             createdDate: Date(),
             originOffsetX: 0,
-            originOffsetZ: 0
+            originOffsetZ: 0,
+            vertexHeights: MapEditorSaveData.encodeHeights(gameMap.vertexHeights),
+            undergroundVertexHeights: MapEditorSaveData.encodeHeights(underground.vertexHeights)
         )
 
         MapStorage.createSizeFoldersIfNeeded()

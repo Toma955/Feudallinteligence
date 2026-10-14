@@ -198,12 +198,14 @@ extension GameState {
         case .working(let placementId):
             buildingStates[placementId]?.worker = .inside
         case .delivering(let fromId, let toId):
-            depositDelivery(from: fromId, to: toId)
+            depositDelivery(from: fromId, to: toId, personId: person.id)
         case .fetching(let fromId, let storeId):
-            finishFetch(from: fromId, storeId: storeId)
+            finishFetch(from: fromId, storeId: storeId, personId: person.id)
         case .returningToWork(let placementId):
             people.update(id: person.id) { $0.activity = .working(placementId: placementId) }
             buildingStates[placementId]?.worker = .inside
+        case .workingField(let placementId, _):
+            buildingStates[placementId]?.worker = .walking(ticksLeft: 1)
         case .atFire:
             guard let seat = realmSeats.seats.first(where: { $0.id == person.factionId }) else { return }
             people.update(id: person.id) { $0.facing = facingHearth($0, seat: seat) }
@@ -257,7 +259,41 @@ extension GameState {
     }
 
     func worker(of placementId: String) -> Person? {
-        people.people.first { $0.activity.jobPlacementId == placementId }
+        workers(of: placementId).first
+    }
+
+    /// Svi radnici dodijeljeni toj građevini.
+    func workers(of placementId: String) -> [Person] {
+        people.people.filter { $0.activity.jobPlacementId == placementId }
+    }
+
+    /// Radnik koji je unutra (za dostavu / dohvat).
+    func workerInside(of placementId: String) -> Person? {
+        workersInside(of: placementId).first
+    }
+
+    func workersInside(of placementId: String) -> [Person] {
+        workers(of: placementId).filter {
+            if case .working = $0.activity { return true }
+            return false
+        }
+    }
+
+    /// Kurir za dohvat/dostavu — ostavlja barem `keepInside` proizvođača u zgradi.
+    func pickCourier(of placementId: String, keepInside: Int) -> Person? {
+        let inside = workersInside(of: placementId)
+        guard inside.count > keepInside else { return nil }
+        return inside.last
+    }
+
+    /// Koliko radnika treba ova građevina (bilježnica building_workers.json).
+    func workersRequired(for objectId: String) -> Int {
+        BuildingWorkersNotebook.required(for: objectId)
+    }
+
+    /// Koliko mora biti unutra da ciklus proizvodi (kurir ne broji).
+    func producersRequired(for objectId: String) -> Int {
+        BuildingWorkersNotebook.producersRequired(for: objectId)
     }
 
     /// Potezi do dolaska radnika.

@@ -191,11 +191,16 @@ extension GameState {
         unitsThatFit(good, adding: 1, faction: faction) > 0
     }
 
-    /// Koliko se jedinica može dodati: ostatak na trenutnom polju plus prazna polja.
+    /// Koliko se jedinica može dodati u odgovarajuće skladište (smočnica, lager, oružarnica…).
     /// Ne mijenja layout (izbjegava "Publishing changes from within view updates").
     func unitsThatFit(_ good: Good, adding: Int, faction: String) -> Int {
         guard adding > 0 else { return 0 }
         if good == .gold { return adding }
+        guard let kind = StorageKind.of(good) else { return adding }
+        if kind != .warehouse {
+            let free = storageCapacity(kind, of: faction) - storageStored(kind, of: faction)
+            return min(adding, max(0, free))
+        }
         let limit = WarehouseSpotNotebook.limit(for: good)
         guard limit > 0 else { return 0 }
         let stores = lagerStores(of: faction)
@@ -204,7 +209,7 @@ extension GameState {
         let have = goodAmount(good, of: faction)
         let mine = baysNeeded(for: good, faction: faction)
         var usedByOthers = 0
-        for other in Good.allCases where other != .gold && other != good {
+        for other in StorageKind.warehouse.goods where other != good {
             usedByOthers += baysNeeded(for: other, faction: faction)
         }
         let free = max(0, totalBays - mine - usedByOthers)
@@ -339,13 +344,13 @@ extension GameState {
         }
     }
 
-    func finishFetch(from workplaceId: String, storeId: String) {
+    func finishFetch(from workplaceId: String, storeId: String, personId: String) {
         guard var state = buildingStates[workplaceId],
               let workplace = locatePlacement(id: workplaceId)?.placement,
-              let cycle = WorkCycleCatalog.cycle(for: workplace.objectId),
+              let cycle = workCycle(for: workplace, millGrain: state.millGrain),
               let faction = owner(of: workplace),
               let seat = seat(of: faction),
-              let person = worker(of: workplaceId) else { return }
+              people.person(id: personId) != nil else { return }
         let hasInputs = cycle.inputs.allSatisfy { goodAmount($0.key, of: faction) >= $0.value }
         if hasInputs {
             for (good, amount) in cycle.inputs { addGood(good, -amount, to: faction) }
@@ -358,7 +363,7 @@ extension GameState {
         buildingStates[workplaceId] = state
         let back = entrance(of: workplace, from: hearthCell(of: seat))
         let layer = locatePlacement(id: workplaceId)?.layer ?? .surface
-        people.update(id: person.id) {
+        people.update(id: personId) {
             $0.activity = .returningToWork(placementId: workplaceId)
             $0.targetRow = back.row
             $0.targetCol = back.col

@@ -244,13 +244,13 @@ enum BuildingShapes {
 
     static func brewery() -> SCNNode {
         let root = named("brewery")
-        k.slab(to: root, width: 5 * s, depth: 5 * s, color: k.earth)
-        k.cottage(to: root, width: 3.6 * s, depth: 3.2 * s, wallH: 2.6 * s, roofH: 1.3 * s, wall: k.plaster, roofColor: k.roofTile)
-        k.chimney(to: root, at: SCNVector3(1.3 * s, 3.4 * s, -0.4 * s), height: 1.5 * s)
+        k.slab(to: root, width: 4 * s, depth: 4 * s, color: k.earth)
+        k.cottage(to: root, width: 3.0 * s, depth: 2.7 * s, wallH: 2.4 * s, roofH: 1.2 * s, wall: k.plaster, roofColor: k.roofTile)
+        k.chimney(to: root, at: SCNVector3(1.05 * s, 3.1 * s, -0.35 * s), height: 1.4 * s)
         for i in 0..<3 {
-            k.cylinder(to: root, radius: 0.38 * s, height: 0.55 * s, color: k.timberDark, at: SCNVector3((-1.2 + CGFloat(i) * 0.85) * s, 0.35 * s, 1.85 * s), segments: 10)
+            k.cylinder(to: root, radius: 0.32 * s, height: 0.50 * s, color: k.timberDark, at: SCNVector3((-1.0 + CGFloat(i) * 0.72) * s, 0.32 * s, 1.45 * s), segments: 10)
         }
-        k.cylinder(to: root, radius: 0.55 * s, height: 1.15 * s, color: k.iron, at: SCNVector3(1.55 * s, 0.65 * s, 1.55 * s), segments: 10)
+        k.cylinder(to: root, radius: 0.45 * s, height: 1.05 * s, color: k.iron, at: SCNVector3(1.25 * s, 0.60 * s, 1.25 * s), segments: 10)
         return root
     }
 

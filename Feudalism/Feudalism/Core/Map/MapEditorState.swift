@@ -24,6 +24,19 @@ struct MapEditorUndoAction {
     }
 }
 
+/// Alat unutar editora jednog mora (kasnije: zidovi, obala, voda…).
+enum SeaEditorTool: String, CaseIterable, Identifiable {
+    case povrsina = "Površina mora"
+
+    var id: String { rawValue }
+
+    var systemImage: String {
+        switch self {
+        case .povrsina: return "rectangle.dashed"
+        }
+    }
+}
+
 /// Stanje koje se generira na mapi kad se uključi editor mode – linka se na GameMap.
 /// Ne spremaju se u fizičku datoteku.
 final class MapEditorState: ObservableObject {
@@ -44,11 +57,20 @@ final class MapEditorState: ObservableObject {
     /// Zastavice za debug (npr. prikaz mreže, normale).
     @Published var debugFlags: Set<String> = []
 
+    /// Sjeme spojenog mora koje se uređuje (klik na more). `nil` = nije u editoru mora.
+    @Published var editingSeaSeed: MapCoordinate?
+    /// Ćelije spojene u to more (4-susjedi).
+    @Published var editingSeaCells: Set<MapCoordinate> = []
+    /// Odabrani alat u editoru mora.
+    @Published var seaEditorTool: SeaEditorTool?
+
     /// Undo stog – globalno po editoru, ne po tileu.
     @Published private(set) var undoStack: [MapEditorUndoAction] = []
     @Published private(set) var redoStack: [MapEditorUndoAction] = []
 
     let maxUndoSteps: Int = 64
+
+    var isSeaEditorActive: Bool { editingSeaSeed != nil }
 
     init() {}
 
@@ -100,7 +122,14 @@ final class MapEditorState: ObservableObject {
         brushPreviewCells = []
         tempHeightDelta = 0
         paintMask = []
+        exitSeaEditor()
         undoStack.removeAll()
         redoStack.removeAll()
+    }
+
+    func exitSeaEditor() {
+        editingSeaSeed = nil
+        editingSeaCells = []
+        seaEditorTool = nil
     }
 }

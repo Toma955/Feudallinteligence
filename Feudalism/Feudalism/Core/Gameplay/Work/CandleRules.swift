@@ -2,7 +2,7 @@
 //  CandleRules.swift
 //  Feudalism
 //
-//  Košnica → med i vosak → svijeća. Samo podzemlje treba svijeću da bi radilo.
+//  Farma cvijeća (košnice) → med, vosak i svijeće. Samo podzemlje treba svijeću da bi radilo.
 //  Na površini svijeća nije uvjet. Količina je za sada 1 i ne troši se.
 //
 

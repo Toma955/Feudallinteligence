@@ -55,6 +55,7 @@ final class RealmSeatRuntime {
     private var snapshots: [KingRenderSnapshot] = []
     private let lock = NSLock()
     private var timer: Timer?
+    private var advancing = false
     private let speedCellsPerSecond = 1.35
     /// Ćelija je zatvorena postavljenim objektom. Vrata vraćaju false.
     var blocksCell: ((Int, Int) -> Bool)?
@@ -68,6 +69,7 @@ final class RealmSeatRuntime {
     func stop() {
         timer?.invalidate()
         timer = nil
+        advancing = false
         seats = []
         publish()
     }
@@ -186,10 +188,11 @@ final class RealmSeatRuntime {
     var timeScale: Double = 1
 
     private func startWalk(rows: Int, cols: Int, animate: Bool) {
+        timer?.invalidate()
+        timer = nil
         guard animate else { return }
         let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            self.advance(dt: 0.05 * self.timeScale, rows: rows, cols: cols)
+            self?.advance(dt: 0.05 * (self?.timeScale ?? 1), rows: rows, cols: cols)
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
@@ -216,38 +219,52 @@ final class RealmSeatRuntime {
     }
 
     private func advance(dt: Double, rows: Int, cols: Int) {
+        // Lokalna kopija: mutacija `seats[i]` usred petlje ruši COW buffer
+        // (_ContiguousArrayStorage deallocated with non-zero retain count).
+        guard !advancing else { return }
+        advancing = true
+        defer { advancing = false }
+
+        var next = seats
         var changed = false
-        for i in seats.indices where seats[i].kingAlive {
-            let targetRow = Double(seats[i].destinationRow)
-            let targetCol = Double(seats[i].destinationCol)
-            let dRow = targetRow - seats[i].kingRow
-            let dCol = targetCol - seats[i].kingCol
+        for i in next.indices {
+            guard next[i].kingAlive else { continue }
+            var seat = next[i]
+            let targetRow = Double(seat.destinationRow)
+            let targetCol = Double(seat.destinationCol)
+            let dRow = targetRow - seat.kingRow
+            let dCol = targetCol - seat.kingCol
             if hypot(dRow, dCol) < 0.12 {
-                let next = randomWanderTarget(for: seats[i], rows: rows, cols: cols)
-                seats[i].destinationRow = next.row
-                seats[i].destinationCol = next.col
-                seats[i].patrolIndex += 1
+                let wander = randomWanderTarget(for: seat, rows: rows, cols: cols)
+                seat.destinationRow = wander.row
+                seat.destinationCol = wander.col
+                seat.patrolIndex += 1
             }
-            let aimRow = Double(seats[i].destinationRow) - seats[i].kingRow
-            let aimCol = Double(seats[i].destinationCol) - seats[i].kingCol
+            let aimRow = Double(seat.destinationRow) - seat.kingRow
+            let aimCol = Double(seat.destinationCol) - seat.kingCol
             let aim = hypot(aimRow, aimCol)
-            guard aim > 0.001 else { continue }
-            seats[i].pauseRemaining = 0
-            seats[i].walkPhase += dt * 7.5
-            seats[i].facing = atan2(aimCol, aimRow)
-            let step = min(aim, speedCellsPerSecond * dt)
-            let nextRow = seats[i].kingRow + aimRow / aim * step
-            let nextCol = seats[i].kingCol + aimCol / aim * step
-            if let slid = slideAroundObjects(fromRow: seats[i].kingRow, fromCol: seats[i].kingCol, toRow: nextRow, toCol: nextCol) {
-                seats[i].kingRow = slid.row
-                seats[i].kingCol = slid.col
-            } else {
-                let next = randomWanderTarget(for: seats[i], rows: rows, cols: cols)
-                seats[i].destinationRow = next.row
-                seats[i].destinationCol = next.col
+            guard aim > 0.001 else {
+                next[i] = seat
+                continue
             }
+            seat.pauseRemaining = 0
+            seat.walkPhase += dt * 7.5
+            seat.facing = atan2(aimCol, aimRow)
+            let step = min(aim, speedCellsPerSecond * dt)
+            let nextRow = seat.kingRow + aimRow / aim * step
+            let nextCol = seat.kingCol + aimCol / aim * step
+            if let slid = slideAroundObjects(fromRow: seat.kingRow, fromCol: seat.kingCol, toRow: nextRow, toCol: nextCol) {
+                seat.kingRow = slid.row
+                seat.kingCol = slid.col
+            } else {
+                let wander = randomWanderTarget(for: seat, rows: rows, cols: cols)
+                seat.destinationRow = wander.row
+                seat.destinationCol = wander.col
+            }
+            next[i] = seat
             changed = true
         }
+        seats = next
         if changed { publish() }
     }
 
@@ -320,9 +337,9 @@ final class RealmSeatRuntime {
     }
 
     private func publish() {
-        let next = seats.map { seat in
-            let moving = seat.kingAlive
-            return KingRenderSnapshot(
+        let seatsCopy = seats
+        let next = seatsCopy.map { seat in
+            KingRenderSnapshot(
                 factionId: seat.id,
                 colorHex: seat.colorHex,
                 castleRow: seat.castleRow,
@@ -332,7 +349,7 @@ final class RealmSeatRuntime {
                 facing: seat.facing,
                 alive: seat.kingAlive,
                 healthPercent: seat.kingHealthPercent,
-                moving: moving,
+                moving: seat.kingAlive,
                 walkPhase: seat.walkPhase
             )
         }
@@ -384,6 +401,7 @@ extension GameState {
         campaignResult = nil
         factionDefeatNotice = nil
         peopleCount = 0
+        AudioManager.shared.stopFireLoop()
     }
 
     func movePlayerKing(toRow row: Int, col: Int) {

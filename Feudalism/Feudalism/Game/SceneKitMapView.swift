@@ -174,8 +174,9 @@ private func makeTerrainGeometryWithHeights(gameMap: GameMap) -> SCNGeometry? {
     let coveredByFloors = cellsCoveredByBuildingFloors(gameMap)
     for r in 0..<rows {
         for c in 0..<cols {
+            // More: zasada ravna površina (boja); SeaBasin korito/voda kasnije u editoru mora.
             let surface = gameMap.surface(row: r, col: c)
-            let tint = terrainPadTint(gameMap.cell(row: r, col: c), row: r, col: c, covered: coveredByFloors)
+            let tint = terrainPadTint(gameMap.cell(row: r, col: c), gameMap: gameMap, row: r, col: c, covered: coveredByFloors)
             let base = Int32(vertices.count)
             for point in surface.allPoints {
                 let x = -halfW + point.x * stepW
@@ -194,6 +195,15 @@ private func makeTerrainGeometryWithHeights(gameMap: GameMap) -> SCNGeometry? {
                 base + 3, base, center
             ])
         }
+    }
+    // Cijela mapa more: nema gornje plohe (samo SeaBasin korito).
+    if topIndices.isEmpty {
+        if vertices.isEmpty {
+            vertices.append(SCNVector3(0, 0, 0))
+            uvs.append(.zero)
+            colors.append(contentsOf: [1, 1, 1] as [Float])
+        }
+        topIndices.append(contentsOf: [0, 0, 0])
     }
     func triNormal(_ a: SCNVector3, _ b: SCNVector3, _ c: SCNVector3) -> SCNVector3 {
         let e1 = SCNVector3(b.x - a.x, b.y - a.y, b.z - a.z)
@@ -279,8 +289,8 @@ private func makeTerrainGeometryWithHeights(gameMap: GameMap) -> SCNGeometry? {
 }
 
 /// Boja ploče na terenu: bijelo = obična trava, inače podloga ostaje vidljiva.
-/// Pod građevine prekriva podlogu — tu teren ostaje neutralan.
-private func terrainPadTint(_ cell: MapCell?, row: Int, col: Int, covered: Set<MapCoordinate> = []) -> [Float] {
+/// Pod građevine prekriva podlogu — tu teren ostaje neutralan. Obala je SeaBasin coast mesh.
+private func terrainPadTint(_ cell: MapCell?, gameMap: GameMap, row: Int, col: Int, covered: Set<MapCoordinate> = []) -> [Float] {
     if covered.contains(MapCoordinate(row: row, col: col)) { return [1, 1, 1] }
     guard let cell, let pad = buildPadOverlayColor(cell, row: row, col: col) else { return [1, 1, 1] }
     return [0.22 + pad[0] * 0.78, 0.22 + pad[1] * 0.78, 0.22 + pad[2] * 0.78]
@@ -412,6 +422,8 @@ private func makeHeightTerrainNode(gameMap: GameMap) -> SCNNode {
     node.name = "terrain"
     node.categoryBitMask = 1
     node.renderingOrder = -100
+    // SeaBasin (korito + voda) isključen dok se uređuje samo površina mora.
+    // SeaBasin.attach(to: node, gameMap: gameMap)
     return node
 }
 
@@ -577,6 +589,12 @@ private final class SceneKitMapNSView: NSView {
     var isEraseMode = false
     /// Map Editor – mod „Odabir ćelija”: klik označuje/uklanja ćeliju.
     var isCellSelectionMode = false
+    /// Map Editor – alat Teren: click-drag označava pravokutnik za paint (more, podloge…).
+    var isTerrainEditMode = false
+    /// Pregled pravokutnika (r0,c0,r1,c1) dok se vuče.
+    var onTerrainPaintPreview: ((Int, Int, Int, Int) -> Void)?
+    /// Primjena na pravokutnik pri mouseUp.
+    var onTerrainPaintCommit: ((Int, Int, Int, Int) -> Void)?
     var hasObjectSelected: Bool = false
     /// Pan kamere dozvoljen samo kad ništa nije označeno (nema objekta za postavljanje, nije Teren, nije Briši).
     var cameraPanAllowed: Bool = true
@@ -613,6 +631,11 @@ private final class SceneKitMapNSView: NSView {
     var isWallLineActive: Bool { wallLineStartCell != nil }
     private static let clickDragThreshold: CGFloat = 6
     private var mouseDownLocation: NSPoint = .zero
+    private var terrainPaintOrigin: (row: Int, col: Int)?
+    private var terrainPaintFar: (row: Int, col: Int)?
+    private(set) var terrainPaintDragging = false
+    /// True dok je lijevi klik držan u Teren modu (preview / drag).
+    var isTerrainPaintActive: Bool { terrainPaintOrigin != nil }
     /// Kad true: dva prsta = pan, pinch = zoom, rotacija = mapRotation. Kad false: miš (povuci = pan, scroll = zoom).
     var useTrackpad: Bool = true
     private var magnifyMonitor: Any?
@@ -1189,6 +1212,16 @@ private final class SceneKitMapNSView: NSView {
             onWallLinePreview?(wallLineCells)
             return
         }
+        if isTerrainEditMode {
+            // groundCell (ravnina) — mesh hit pada na rupama/moru i prekida označavanje.
+            let cell = groundCell(at: lastPanLocation) ?? (row, col)
+            terrainPaintOrigin = cell
+            terrainPaintFar = cell
+            terrainPaintDragging = false
+            pendingClickCell = cell
+            onTerrainPaintPreview?(cell.row, cell.col, cell.row, cell.col)
+            return
+        }
         pendingClickCell = (row, col)
     }
 
@@ -1241,6 +1274,19 @@ private final class SceneKitMapNSView: NSView {
             isPanning = false
             markDragged = true
             updateGroundMarkFar(at: loc)
+            lastPanLocation = loc
+            return
+        }
+        if isTerrainEditMode, let origin = terrainPaintOrigin {
+            let dist = hypot(loc.x - mouseDownLocation.x, loc.y - mouseDownLocation.y)
+            if dist > Self.clickDragThreshold {
+                terrainPaintDragging = true
+                pendingClickCell = nil
+            }
+            if let cell = groundCell(at: loc) {
+                terrainPaintFar = cell
+                onTerrainPaintPreview?(origin.row, origin.col, cell.row, cell.col)
+            }
             lastPanLocation = loc
             return
         }
@@ -1305,6 +1351,21 @@ private final class SceneKitMapNSView: NSView {
                 onWallLineCommit?(commitCells)
             }
             return
+        }
+        if event.buttonNumber == 0, isTerrainEditMode, let origin = terrainPaintOrigin {
+            let far = terrainPaintFar ?? origin
+            let wasDrag = terrainPaintDragging
+            terrainPaintOrigin = nil
+            terrainPaintFar = nil
+            terrainPaintDragging = false
+            if wasDrag {
+                onTerrainPaintCommit?(origin.row, origin.col, far.row, far.col)
+                pendingClickCell = nil
+                pendingVertexDot = nil
+                pendingCastleClick = false
+                return
+            }
+            // Jedan klik bez povlačenja – postojeći onClick / četkica.
         }
         if event.buttonNumber == 0, let order = pendingMoveOrder, !isPanning {
             pendingMoveOrder = nil
@@ -1443,6 +1504,24 @@ private func terrainHeightAtWorld(x: CGFloat, z: CGFloat, gameMap: GameMap, rows
 
 /// Zelena površina samo nad označenim ćelijama: ravni quad po ćeliji na visini te ćelije (Y = visina, horizontalno u XZ – ostale ćelije na miru).
 private func makeGreenSurfaceGeometry(gameMap: GameMap, cells: Set<MapCoordinate>, rows: Int, cols: Int) -> SCNGeometry? {
+    makeSelectionSurfaceGeometry(
+        gameMap: gameMap, cells: cells, rows: rows, cols: cols,
+        diffuse: NSColor(red: 0.5, green: 0.98, blue: 0.55, alpha: 0.75),
+        emission: NSColor(red: 0.55, green: 1.0, blue: 0.6, alpha: 0.6)
+    )
+}
+
+/// Overlay označenog područja (zeleno ili more-plavo dok se vuče četkica).
+/// Prati površinu terena (vertex visine), kao ground mark — inače overlay završi ispod mreže.
+private func makeSelectionSurfaceGeometry(
+    gameMap: GameMap,
+    cells: Set<MapCoordinate>,
+    rows: Int,
+    cols: Int,
+    diffuse: NSColor,
+    emission: NSColor,
+    lift: CGFloat = 0.22
+) -> SCNGeometry? {
     guard !cells.isEmpty else { return nil }
     let halfW = effectiveMapWorldW(cols: cols) / 2
     let halfH = effectiveMapWorldH(rows: rows) / 2
@@ -1452,51 +1531,38 @@ private func makeGreenSurfaceGeometry(gameMap: GameMap, cells: Set<MapCoordinate
     for coord in cells {
         let (r, c) = (coord.row, coord.col)
         guard r >= 0, r < rows, c >= 0, c < cols else { continue }
-        let h = gameMap.cell(row: r, col: c)?.height ?? 0
-        let x0 = CGFloat(c) * step - halfW
-        let x1 = CGFloat(c + 1) * step - halfW
-        let z0 = CGFloat(r) * step - halfH
-        let z1 = CGFloat(r + 1) * step - halfH
+        let surface = gameMap.surface(row: r, col: c)
         let base = Int32(vertices.count)
-        vertices.append(SCNVector3(x0, h, z0))
-        vertices.append(SCNVector3(x1, h, z0))
-        vertices.append(SCNVector3(x1, h, z1))
-        vertices.append(SCNVector3(x0, h, z1))
-        indices.append(contentsOf: [base, base + 1, base + 2, base, base + 2, base + 3])
+        // Y-up (overlay na scene.rootNode), ista formula kao ground mark / pad overlay.
+        for point in surface.allPoints {
+            vertices.append(SCNVector3(
+                point.x * step - halfW,
+                point.height + lift,
+                point.z * step - halfH
+            ))
+        }
+        let center = base + 4
+        indices.append(contentsOf: [
+            base, center, base + 1,
+            base + 1, center, base + 2,
+            base + 2, center, base + 3,
+            base + 3, center, base
+        ])
     }
     guard !vertices.isEmpty else { return nil }
-    func triNormal(_ a: SCNVector3, _ b: SCNVector3, _ c: SCNVector3) -> SCNVector3 {
-        let e1 = SCNVector3(b.x - a.x, b.y - a.y, b.z - a.z)
-        let e2 = SCNVector3(c.x - a.x, c.y - a.y, c.z - a.z)
-        let nx = e1.y * e2.z - e1.z * e2.y
-        let ny = e1.z * e2.x - e1.x * e2.z
-        let nz = e1.x * e2.y - e1.y * e2.x
-        let len = sqrt(nx * nx + ny * ny + nz * nz)
-        guard len > 1e-6 else { return SCNVector3(0, 1, 0) }
-        return SCNVector3(nx / len, ny / len, nz / len)
-    }
-    var normalAccum = [SCNVector3](repeating: SCNVector3(0, 0, 0), count: vertices.count)
-    for i in stride(from: 0, to: indices.count, by: 3) {
-        let ia = Int(indices[i]), ib = Int(indices[i + 1]), ic = Int(indices[i + 2])
-        let n = triNormal(vertices[ia], vertices[ib], vertices[ic])
-        normalAccum[ia].x += n.x; normalAccum[ia].y += n.y; normalAccum[ia].z += n.z
-        normalAccum[ib].x += n.x; normalAccum[ib].y += n.y; normalAccum[ib].z += n.z
-        normalAccum[ic].x += n.x; normalAccum[ic].y += n.y; normalAccum[ic].z += n.z
-    }
-    let normals = normalAccum.map { n -> SCNVector3 in
-        let len = sqrt(n.x * n.x + n.y * n.y + n.z * n.z)
-        guard len > 1e-6 else { return SCNVector3(0, 1, 0) }
-        return SCNVector3(n.x / len, n.y / len, n.z / len)
-    }
     let mat = SCNMaterial()
-    mat.diffuse.contents = NSColor(red: 0.5, green: 0.98, blue: 0.55, alpha: 0.75)
-    mat.emission.contents = NSColor(red: 0.55, green: 1.0, blue: 0.6, alpha: 0.6)
+    mat.diffuse.contents = diffuse
+    mat.emission.contents = emission
     mat.isDoubleSided = true
     mat.lightingModel = .constant
-    let vertexSource = SCNGeometrySource(vertices: vertices)
-    let normalSource = SCNGeometrySource(normals: normals)
-    let element = SCNGeometryElement(indices: indices, primitiveType: .triangles)
-    let geo = SCNGeometry(sources: [vertexSource, normalSource], elements: [element])
+    mat.blendMode = .alpha
+    mat.transparencyMode = .singleLayer
+    mat.writesToDepthBuffer = false
+    mat.readsFromDepthBuffer = false
+    let geo = SCNGeometry(
+        sources: [SCNGeometrySource(vertices: vertices)],
+        elements: [SCNGeometryElement(indices: indices, primitiveType: .triangles)]
+    )
     geo.materials = [mat]
     return geo
 }
@@ -1512,7 +1578,7 @@ private func buildPadOverlayColor(_ cell: MapCell, row: Int, col: Int) -> [Float
         if cell.povrsina == .plodna { return [0.16, 0.68, 0.22] }
         if cell.povrsina == .pustinja { return [0.86, 0.76, 0.48] }
         if cell.povrsina == .voda { return [0.25, 0.55, 0.86] }
-        if cell.povrsina == .more { return [0.08, 0.22, 0.55] }
+        if cell.povrsina == .more { return [0.05, 0.20, 0.65] } // površina mora (bez vode/korita)
         if cell.povrsina == .mocvara { return [0.28, 0.38, 0.22] }
         return nil
     }
@@ -1747,7 +1813,7 @@ private func worldPositionAtCell(row: Int, col: Int, rows: Int, cols: Int) -> SC
     return SCNVector3(x, groundLevelY, z)
 }
 
-/// Kvadrat oznake vojske: zelena ploha na terenu plus okvir, ostaje dok se oznaka ne skine.
+/// Kvadrat oznake vojske: samo lagana prozirna zelena ploha na tlu (bez gornjeg obruba).
 private func refreshGroundMark(_ node: SCNNode?, origin: (row: Int, col: Int)?, far: (row: Int, col: Int)?, rows: Int, cols: Int, gameMap: GameMap?) {
     guard let node else { return }
     node.childNodes.forEach { $0.removeFromParentNode() }
@@ -1766,45 +1832,6 @@ private func refreshGroundMark(_ node: SCNNode?, origin: (row: Int, col: Int)?, 
         fill.categoryBitMask = 1
         fill.renderingOrder = 800
         node.addChildNode(fill)
-    }
-    let cell = worldUnitsPerCell
-    let halfW = effectiveMapWorldW(cols: cols) / 2
-    let halfH = effectiveMapWorldH(rows: rows) / 2
-    let width = CGFloat(maxC - minC + 1) * cell
-    let length = CGFloat(maxR - minR + 1) * cell
-    let centerX = CGFloat(minC + maxC + 1) * cell / 2 - halfW
-    let centerZ = CGFloat(minR + maxR + 1) * cell / 2 - halfH
-    var top: CGFloat = 0.4
-    if let gameMap {
-        for r in minR...maxR {
-            for c in minC...maxC {
-                top = max(top, gameMap.surface(row: r, col: c).allPoints.map(\.height).max() ?? 0)
-            }
-        }
-    }
-    let lift = top + 0.18
-    let edgeMat = SCNMaterial()
-    edgeMat.diffuse.contents = NSColor(red: 0.15, green: 0.95, blue: 0.28, alpha: 1)
-    edgeMat.emission.contents = NSColor(red: 0.25, green: 1, blue: 0.4, alpha: 1)
-    edgeMat.lightingModel = .constant
-    edgeMat.isDoubleSided = true
-    edgeMat.readsFromDepthBuffer = false
-    edgeMat.writesToDepthBuffer = false
-    let thickness: CGFloat = max(0.18, cell * 0.2)
-    let edges: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [
-        (width, thickness, centerX, centerZ - length / 2),
-        (width, thickness, centerX, centerZ + length / 2),
-        (thickness, length, centerX - width / 2, centerZ),
-        (thickness, length, centerX + width / 2, centerZ)
-    ]
-    for edge in edges {
-        let bar = SCNBox(width: max(thickness, edge.0), height: 0.22, length: max(thickness, edge.1), chamferRadius: 0)
-        bar.materials = [edgeMat]
-        let barNode = SCNNode(geometry: bar)
-        barNode.position = SCNVector3(edge.2, lift, edge.3)
-        barNode.categoryBitMask = 1
-        barNode.renderingOrder = 802
-        node.addChildNode(barNode)
     }
 }
 
@@ -1828,8 +1855,8 @@ private func makeGroundMarkGeometry(gameMap: GameMap, cells: Set<MapCoordinate>,
     }
     guard !vertices.isEmpty else { return nil }
     let mat = SCNMaterial()
-    mat.diffuse.contents = NSColor(red: 0.2, green: 0.95, blue: 0.35, alpha: 0.45)
-    mat.emission.contents = NSColor(red: 0.25, green: 1, blue: 0.4, alpha: 0.35)
+    mat.diffuse.contents = NSColor(red: 0.25, green: 0.85, blue: 0.35, alpha: 0.22)
+    mat.emission.contents = NSColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 0.08)
     mat.lightingModel = .constant
     mat.isDoubleSided = true
     mat.readsFromDepthBuffer = false
@@ -1843,15 +1870,40 @@ private func makeGroundMarkGeometry(gameMap: GameMap, cells: Set<MapCoordinate>,
     return geo
 }
 
-/// Označavanje odabranih ćelija: jedna zelena površina (3D) koja prati teren.
-private func refreshCellSelectionOverlay(overlayNode: SCNNode, selectedCells: Set<MapCoordinate>, gameMap: GameMap, rows: Int, cols: Int) {
+/// Označavanje odabranih ćelija: površina (3D) koja prati teren.
+/// `seaPreview` = plavo višećelijsko označavanje (alat More).
+private func refreshCellSelectionOverlay(
+    overlayNode: SCNNode,
+    selectedCells: Set<MapCoordinate>,
+    gameMap: GameMap,
+    rows: Int,
+    cols: Int,
+    seaPreview: Bool = false
+) {
     overlayNode.childNodes.forEach { $0.removeFromParentNode() }
     guard !selectedCells.isEmpty else { return }
-    if let geo = makeGreenSurfaceGeometry(gameMap: gameMap, cells: selectedCells, rows: rows, cols: cols) {
+    let diffuse: NSColor
+    let emission: NSColor
+    if seaPreview {
+        // Jasan plavi preview dok se vuče područje mora.
+        diffuse = NSColor(calibratedRed: 0.10, green: 0.45, blue: 1.0, alpha: 0.72)
+        emission = NSColor(calibratedRed: 0.25, green: 0.60, blue: 1.0, alpha: 0.85)
+    } else {
+        diffuse = NSColor(calibratedRed: 0.45, green: 0.95, blue: 0.50, alpha: 0.65)
+        emission = NSColor(calibratedRed: 0.50, green: 1.0, blue: 0.55, alpha: 0.55)
+    }
+    if let geo = makeSelectionSurfaceGeometry(
+        gameMap: gameMap, cells: selectedCells, rows: rows, cols: cols,
+        diffuse: diffuse,
+        emission: emission,
+        lift: 0.28
+    ) {
         let node = SCNNode(geometry: geo)
-        node.name = "cellSelection"
-        node.categoryBitMask = 0
-        node.renderingOrder = 400
+        node.name = seaPreview ? "seaPaintPreview" : "cellSelection"
+        // Mora biti ≠ 0 — inače kamera (AND s categoryBitMask) ne crta čvor.
+        node.categoryBitMask = 1
+        node.renderingOrder = 900
+        node.opacity = 1
         overlayNode.addChildNode(node)
     }
 }
@@ -1891,6 +1943,12 @@ struct SceneKitMapView: NSViewRepresentable {
     var onTerrainEdit: ((Int, Int) -> Void)? = nil
     /// Map Editor – klik primjenjuje četkicu (kockica 1×1, 3×3, 5×5, 7×7).
     var onTerrainAddBrushSelection: ((Int, Int) -> Void)? = nil
+    /// Map Editor – click-drag: pregled pravokutnika (r0,c0,r1,c1).
+    var onTerrainPaintPreview: ((Int, Int, Int, Int) -> Void)? = nil
+    /// Map Editor – click-drag: primjena na pravokutnik.
+    var onTerrainPaintCommit: ((Int, Int, Int, Int) -> Void)? = nil
+    /// Kad true, overlay označenog područja je more-plav (alat More).
+    var terrainPaintSeaPreview: Bool = false
     /// Map Editor – mod „Odabir ćelija”: klik uključuje/isključuje ćeliju u označene (toggle).
     var onCellSelectionToggle: ((Int, Int) -> Void)? = nil
     /// Map Editor – mod „Odabir ćelija”: klik označuje/uklanja jednu ćeliju (precizno).
@@ -1903,6 +1961,8 @@ struct SceneKitMapView: NSViewRepresentable {
     var editorOverlayMode: MapEditorPaintMode? = nil
     /// Map Editor – istaknuto početno mjesto AI lorda.
     var selectedLordStartSlot: Int? = nil
+    /// Map Editor – klik na ćeliju kad nije paint/place/erase (npr. otvori editor mora).
+    var onMapEditorCellTap: ((Int, Int) -> Void)? = nil
     var isPlaceMode: Bool { gameState.selectedPlacementObjectId != nil }
 
     /// U Map Editoru: jedna ili obje mreže (10×10, 40×40); kad obje isključene, nema mreže.
@@ -1969,13 +2029,6 @@ struct SceneKitMapView: NSViewRepresentable {
         var level: LoadedLevel?
         // Solo i mapa iz datoteke: teren iz ćelija, podloga je tlo.
         if gameState.isSoloMode && !gameState.isMapEditorMode {
-            DispatchQueue.main.async {
-                let hasBuildings = !gameState.gameMap.placements.isEmpty
-                gameState.levelLoadingMessage = hasBuildings
-                    ? "Učitavanje mape i građevina (\(gameState.gameMap.displayDimensionString))…"
-                    : "Učitavanje mape (\(gameState.gameMap.displayDimensionString))…"
-                gameState.objectWillChange.send()
-            }
             let terrain = makeHeightTerrainNode(gameMap: gameState.gameMap)
             terrain.position = SCNVector3Zero
             scene.rootNode.addChildNode(terrain)
@@ -1989,10 +2042,6 @@ struct SceneKitMapView: NSViewRepresentable {
             } else {
                 level = SceneKitLevelLoader.loadForSoloMode(bundleLevelName: gameState.currentLevelName, bundle: .main)
                 if level == nil {
-                    DispatchQueue.main.async {
-                        gameState.levelLoadingMessage = "Generiranje mape (\(gameState.gameMap.displayDimensionString))…"
-                        gameState.objectWillChange.send()
-                    }
                     let w = effectiveMapWorldW(cols: cols)
                     let h = effectiveMapWorldH(rows: rows)
                     let proceduralTerrain = makeProceduralTerrainNode(width: w, height: h, terrainTexture: terrainTextureOnMainThread, gameMap: gameState.gameMap)
@@ -2002,10 +2051,6 @@ struct SceneKitMapView: NSViewRepresentable {
         } else if gameState.isMapEditorMode {
             // Uvijek proceduralni teren: cols×40 (X) × rows×40 (Z) world jedinica. 1 ćelija = 40×40.
             // Ne mijenjati eulerAngles – makeProceduralTerrainNode postavlja eulerAngles.x = -π/2 da ravnina leži u XZ (inače bi stajala pod 90°).
-            DispatchQueue.main.async {
-                gameState.levelLoadingMessage = "Generiranje mape (\(gameState.gameMap.displayDimensionString))…"
-                gameState.objectWillChange.send()
-            }
             let w = effectiveMapWorldW(cols: cols)
             let h = effectiveMapWorldH(rows: rows)
             let proceduralTerrain = makeProceduralTerrainNode(width: w, height: h, terrainTexture: terrainTextureOnMainThread, gameMap: gameState.gameMap)
@@ -2240,6 +2285,8 @@ struct SceneKitMapView: NSViewRepresentable {
 
         let cellSelectionOverlay = SCNNode()
         cellSelectionOverlay.name = "cellSelectionOverlay"
+        cellSelectionOverlay.renderingOrder = 900
+        cellSelectionOverlay.categoryBitMask = 1
         scene.rootNode.addChildNode(cellSelectionOverlay)
         coord.cellSelectionOverlayNode = cellSelectionOverlay
 
@@ -2405,12 +2452,8 @@ struct SceneKitMapView: NSViewRepresentable {
         coord.gridNode?.isHidden = !showGrid
         coord.gridNode10?.isHidden = !showGrid || !gridShow10
         coord.gridNode40?.isHidden = !showGrid || !gridShow40
-        // Postojeće građevine (iz spremljene mape) učitaj u loading fazi – prije nego level postane ready
+        // Postojeće građevine (iz spremljene mape) – bez objectWillChange usred makeNSView.
         let placements = gameState.activeMap.placements
-        if !placements.isEmpty {
-            gameState.levelLoadingMessage = "Učitavanje građevina…"
-            gameState.objectWillChange.send()
-        }
         refreshPlacements(placementsNode, placements: placements, templates: coord.placementTemplates, mapRows: rows, mapCols: cols)
         coord.lastPlacementsCount = placements.count
         DispatchQueue.main.async {
@@ -2418,17 +2461,12 @@ struct SceneKitMapView: NSViewRepresentable {
             gameState.isLevelReady = true
         }
 
-        container.onPanStart = { [gameState] mouseLoc in
-            let s = gameState.mapCameraSettings
-            let msg = "[Camera] pan start miš(view)=(\(String(format: "%.1f", mouseLoc.x)),\(String(format: "%.1f", mouseLoc.y))) kamera panOffset=(\(String(format: "%.1f", s.panOffset.x)),\(String(format: "%.1f", s.panOffset.y))) mapRotation=\(String(format: "%.2f", s.mapRotation)) zoom=\(String(format: "%.1f", s.currentZoom))"
-            print(msg)
-            Task { @MainActor in PlacementDebugConsole.shared.append(msg) }
-        }
+        container.onPanStart = { _ in }
         container.onPanLock = { [gameState] worldDX, worldDZ in
             var s = gameState.mapCameraSettings
             s.panOffset.x -= worldDX
             s.panOffset.y -= worldDZ
-            gameState.mapCameraSettings = s
+            gameState.setMapCameraSettingsSilent(s)
         }
         container.onPanChange = { [gameState] delta in
             var s = gameState.mapCameraSettings
@@ -2436,24 +2474,24 @@ struct SceneKitMapView: NSViewRepresentable {
             let metersPerPixel = h / 350 * CGFloat(gameState.cameraSensitivity)
             s.panOffset.x -= delta.x * metersPerPixel
             s.panOffset.y -= delta.y * metersPerPixel
-            gameState.mapCameraSettings = s
+            gameState.setMapCameraSettingsSilent(s)
         }
         container.onZoomDelta = { [gameState] delta in
             var s = gameState.mapCameraSettings
             let zoomIn = gameState.invertScrollZoom ? delta < 0 : delta > 0
             s.stepZoomPhaseByScroll(zoomIn: zoomIn)
-            gameState.mapCameraSettings = s
+            gameState.setMapCameraSettingsSilent(s)
         }
         container.onTiltDelta = { [gameState] delta in
             var s = gameState.mapCameraSettings
             let signed = gameState.invertYAxis ? -delta : delta
             s.tiltAngle = min(MapCameraSettings.tiltMax, max(MapCameraSettings.tiltMin, s.tiltAngle + signed))
-            gameState.mapCameraSettings = s
+            gameState.setMapCameraSettingsSilent(s)
         }
         container.onRotationDelta = { [gameState] delta in
             var s = gameState.mapCameraSettings
             s.mapRotation += delta
-            gameState.mapCameraSettings = s
+            gameState.setMapCameraSettingsSilent(s)
         }
         container.useTrackpad = gameState.inputDevice == .trackpad
         container.syncPanInputMonitors()
@@ -2492,6 +2530,10 @@ struct SceneKitMapView: NSViewRepresentable {
             let objectId = container.currentSelectedPlacementObjectId ?? gameState.selectedPlacementObjectId
             placementDebug("map click row=\(row) col=\(col) selected=\(objectId ?? "nil")")
             guard let objId = objectId, !objId.isEmpty else {
+                if gameState.isMapEditorMode, let tap = onMapEditorCellTap {
+                    tap(row, col)
+                    return
+                }
                 if !gameState.isMapEditorMode, let placement = gameState.activeMap.placement(at: MapCoordinate(row: row, col: col)) {
                     container.dismissGroundMark()
                     DispatchQueue.main.async { gameState.inspectPlacement(placement) }
@@ -2539,6 +2581,9 @@ struct SceneKitMapView: NSViewRepresentable {
         coord.onTerrainEdit = onTerrainEdit
         coord.onTerrainAddBrushSelection = onTerrainAddBrushSelection
         coord.onCellSelectionToggle = onCellSelectionToggle
+        coord.terrainPaintSeaPreview = terrainPaintSeaPreview
+        container.isTerrainEditMode = isTerrainEditMode
+        wireTerrainPaintDrag(container: container, coord: coord, gameState: gameState)
         container.onVertexDotSelected = { [onVertexDotSelected] vr, vc in
             DispatchQueue.main.async { onVertexDotSelected?(vr, vc) }
         }
@@ -2562,6 +2607,37 @@ struct SceneKitMapView: NSViewRepresentable {
         return container
     }
 
+    /// Click-drag preview: samo SceneKit overlay (bez GameState publish → nema SwiftUI reentrancy).
+    private func wireTerrainPaintDrag(container: SceneKitMapNSView, coord: Coordinator, gameState: GameState) {
+        let onCommit = onTerrainPaintCommit
+        container.onTerrainPaintPreview = { [weak coord] r0, c0, r1, c1 in
+            guard let coord, let overlay = coord.cellSelectionOverlayNode else { return }
+            let cells = Set(gameState.cellsInRectangle(row0: r0, col0: c0, row1: r1, col1: c1))
+            coord.terrainPaintPreviewCells = cells
+            // Dok vučeš pravokutnik, sakrij zeleni brush ghost da se vidi plavo područje.
+            coord.brushPreviewOverlayNode?.isHidden = true
+            refreshCellSelectionOverlay(
+                overlayNode: overlay,
+                selectedCells: cells,
+                gameMap: gameState.gameMap,
+                rows: coord.mapRows,
+                cols: coord.mapCols,
+                seaPreview: coord.terrainPaintSeaPreview
+            )
+        }
+        container.onTerrainPaintCommit = { [weak coord] r0, c0, r1, c1 in
+            coord?.terrainPaintPreviewCells = nil
+            if let overlay = coord?.cellSelectionOverlayNode {
+                overlay.childNodes.forEach { $0.removeFromParentNode() }
+            }
+            coord?.brushPreviewOverlayNode?.isHidden = false
+            // Commit u sljedećem turnu — ne publishaj usred view update / mouse-up.
+            DispatchQueue.main.async {
+                onCommit?(r0, c0, r1, c1)
+            }
+        }
+    }
+
     func updateNSView(_ nsView: NSView, context: Context) {
         guard let container = nsView as? SceneKitMapNSView,
               container.scnView != nil else { return }
@@ -2572,17 +2648,20 @@ struct SceneKitMapView: NSViewRepresentable {
         coord.onTerrainEdit = onTerrainEdit
         coord.onTerrainAddBrushSelection = onTerrainAddBrushSelection
         coord.onCellSelectionToggle = onCellSelectionToggle
+        coord.terrainPaintSeaPreview = terrainPaintSeaPreview
+        container.isTerrainEditMode = isTerrainEditMode
+        wireTerrainPaintDrag(container: container, coord: coord, gameState: gameState)
         container.onVertexDotSelected = { [onVertexDotSelected] vr, vc in
             DispatchQueue.main.async { onVertexDotSelected?(vr, vc) }
-        }
-        if isTerrainEditMode && !wasTerrain {
-            Task { @MainActor in MapEditorConsole.shared.append("Teren: selector uključen (zelena kockica prati miš)") }
         }
         if !isTerrainEditMode {
             coord.brushPreviewOverlayNode?.isHidden = true
         } else {
             coord.brushPreviewOverlayNode?.isHidden = false
-            container.updateGhostFromCurrentMouseLocation()
+            // Ne diraj ghost usred paint-draga — layout reentrancy.
+            if !container.isTerrainPaintActive {
+                container.updateGhostFromCurrentMouseLocation()
+            }
         }
         if let option = terrainBrushOption {
             coord.terrainBrushOption = option
@@ -2626,17 +2705,7 @@ struct SceneKitMapView: NSViewRepresentable {
                 }
             }
         }
-        container.onPanStart = { [gameState] mouseLoc in
-            let s = gameState.mapCameraSettings
-            let msg = "[Camera] pan start miš(view)=(\(String(format: "%.1f", mouseLoc.x)),\(String(format: "%.1f", mouseLoc.y))) kamera panOffset=(\(String(format: "%.1f", s.panOffset.x)),\(String(format: "%.1f", s.panOffset.y))) mapRotation=\(String(format: "%.2f", s.mapRotation)) zoom=\(String(format: "%.1f", s.currentZoom))"
-            print(msg)
-            Task { @MainActor in PlacementDebugConsole.shared.append(msg) }
-        }
-        container.window?.invalidateCursorRects(for: container)
-
-        if let w = container.window, w.isKeyWindow, w.firstResponder != container {
-            w.makeFirstResponder(container)
-        }
+        // Ne zvati makeFirstResponder / invalidateCursorRects ovdje — uzrokuje NSHostingView reentrancy.
 
         // Mapa (rootNode, teren, grid, placements) se NIKAD ne dira – samo kamera i target.
 
@@ -2682,12 +2751,12 @@ struct SceneKitMapView: NSViewRepresentable {
             coord.warehouseStockKey = ""
             coord.lastWarehouseEpoch = -1
         }
-        if let stores = coord.placementsNode {
+        if let node = coord.warehouseNode {
             let key = WarehouseStacks.stockKey(gameState)
             if key != coord.warehouseStockKey || gameState.warehouseGoodsEpoch != coord.lastWarehouseEpoch {
                 coord.warehouseStockKey = key
                 coord.lastWarehouseEpoch = gameState.warehouseGoodsEpoch
-                WarehouseStacks.refresh(in: stores, gameState: gameState)
+                WarehouseStacks.syncWorld(on: node, gameState: gameState, rows: rows, cols: cols)
             }
         }
         let zoom = gameState.mapCameraSettings.currentZoom
@@ -2773,12 +2842,27 @@ struct SceneKitMapView: NSViewRepresentable {
                 newGeo.materials = [oldMat]
             }
             terrain.geometry = newGeo
+            // SeaBasin.attach(to: terrain, gameMap: gameState.gameMap) — kasnije, kad editor mora crta korito/vodu.
         }
 
-        // Map Editor – označene ćelije: prikaži zelenu površinu (3D) nad odabranim ćelijama.
-        if gameState.isMapEditorMode, let overlayNode = coord.cellSelectionOverlayNode {
-            let selected = gameState.mapEditorState?.selectedCells ?? []
-            refreshCellSelectionOverlay(overlayNode: overlayNode, selectedCells: selected, gameMap: gameState.gameMap, rows: coord.mapRows, cols: coord.mapCols)
+        // Map Editor – overlay: dok traje drag, SceneKit callback već crta preview (ne prepisuj).
+        if gameState.isMapEditorMode, let overlayNode = coord.cellSelectionOverlayNode,
+           !container.isTerrainPaintActive {
+            let seaCells = gameState.mapEditorState?.editingSeaCells ?? []
+            let selected = coord.terrainPaintPreviewCells
+                ?? (!seaCells.isEmpty ? seaCells : nil)
+                ?? gameState.mapEditorState?.selectedCells
+                ?? []
+            let seaHighlight = coord.terrainPaintSeaPreview
+                || (gameState.mapEditorState?.isSeaEditorActive == true)
+            refreshCellSelectionOverlay(
+                overlayNode: overlayNode,
+                selectedCells: selected,
+                gameMap: gameState.gameMap,
+                rows: coord.mapRows,
+                cols: coord.mapCols,
+                seaPreview: seaHighlight
+            )
         }
 
         // Ne osvježavaj placements ovdje – inače se pri svakom updateNSView (rotacija, zoom) cijela scena zidova gradi iznova (39 MB .obj + reapplyTexture) → pad FPS. Osvježavanje samo u onClick (place) i nakon onRemoveAt (erase).
@@ -3787,6 +3871,9 @@ struct SceneKitMapView: NSViewRepresentable {
         var onTerrainEdit: ((Int, Int) -> Void)?
         var onTerrainAddBrushSelection: ((Int, Int) -> Void)?
         var onCellSelectionToggle: ((Int, Int) -> Void)?
+        var terrainPaintSeaPreview: Bool = false
+        /// Live click-drag preview (SceneKit-only, bez GameState publish).
+        var terrainPaintPreviewCells: Set<MapCoordinate>?
         var terrainBrushOption: TerrainBrushOption?
         /// Map Editor – zelena površina na terenu za područje pod mišem (bez letećeg elementa).
         var brushPreviewOverlayNode: SCNNode?
@@ -3847,6 +3934,14 @@ struct SceneKitMapView: NSViewRepresentable {
                 if key != pantryStockKey {
                     pantryStockKey = key
                     AppleBasketShapes.refreshPantries(in: stores, gameState: gs)
+                }
+            }
+            if let gs = gameState, let warehouseNode {
+                let key = WarehouseStacks.stockKey(gs)
+                if key != warehouseStockKey {
+                    warehouseStockKey = key
+                    lastWarehouseEpoch = gs.warehouseGoodsEpoch
+                    WarehouseStacks.syncWorld(on: warehouseNode, gameState: gs, rows: mapRows, cols: mapCols)
                 }
             }
             if let gs = gameState, let seats = seatsNode {

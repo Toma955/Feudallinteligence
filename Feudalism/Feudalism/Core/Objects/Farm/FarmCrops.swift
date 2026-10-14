@@ -21,7 +21,7 @@ enum Vegetables: PlaceableSceneKitObject {
         return GameObject(id: objectId, name: "Povrće", category: .farme, width: d.cellWidth, height: d.cellHeight, displayCode: displayCode, modelAssetName: nil)
     }
     static func loadSceneKitNode(from bundle: Bundle = .main) -> SCNNode? {
-        farmFieldNode(name: "vegetables", color: NSColor(red: 0.28, green: 0.55, blue: 0.22, alpha: 1))
+        FarmYard.makeNode(name: "vegetables", crop: .vegetables)
     }
     static func reapplyTexture(to node: SCNNode, bundle: Bundle = .main) -> Bool { true }
 }
@@ -34,7 +34,7 @@ enum Grapes: PlaceableSceneKitObject {
         return GameObject(id: objectId, name: "Vinograd", category: .farme, width: d.cellWidth, height: d.cellHeight, displayCode: displayCode, modelAssetName: nil)
     }
     static func loadSceneKitNode(from bundle: Bundle = .main) -> SCNNode? {
-        farmFieldNode(name: "grapes", color: NSColor(red: 0.42, green: 0.18, blue: 0.42, alpha: 1))
+        FarmYard.makeNode(name: "grapes", crop: .grapes)
     }
     static func reapplyTexture(to node: SCNNode, bundle: Bundle = .main) -> Bool { true }
 }
@@ -60,7 +60,7 @@ enum Flower: PlaceableSceneKitObject {
         return GameObject(id: objectId, name: "Cvijeće", category: .farme, width: d.cellWidth, height: d.cellHeight, displayCode: displayCode, modelAssetName: nil)
     }
     static func loadSceneKitNode(from bundle: Bundle = .main) -> SCNNode? {
-        farmFieldNode(name: "flower", color: NSColor(red: 0.78, green: 0.32, blue: 0.48, alpha: 1))
+        FarmYard.makeNode(name: "flower", crop: .flowers)
     }
     static func reapplyTexture(to node: SCNNode, bundle: Bundle = .main) -> Bool { true }
 }

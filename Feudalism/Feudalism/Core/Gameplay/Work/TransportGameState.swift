@@ -121,7 +121,7 @@ extension GameState {
         }
     }
 
-    func depositDelivery(from workplaceId: String, to destId: String) {
+    func depositDelivery(from workplaceId: String, to destId: String, personId: String) {
         guard var state = buildingStates[workplaceId], let dest = locatePlacement(id: destId)?.placement else { return }
         let cargo = state.pendingOutputs
         if dest.objectId == Carriage.objectId {
@@ -134,10 +134,10 @@ extension GameState {
         buildingStates[workplaceId] = state
         guard let workplace = locatePlacement(id: workplaceId)?.placement,
               let seat = owner(of: workplace).flatMap({ self.seat(of: $0) }),
-              let person = worker(of: workplaceId) else { return }
+              people.person(id: personId) != nil else { return }
         let back = entrance(of: workplace, from: hearthCell(of: seat))
         let layer = locatePlacement(id: workplaceId)?.layer ?? .surface
-        people.update(id: person.id) {
+        people.update(id: personId) {
             $0.activity = .returningToWork(placementId: workplaceId)
             $0.targetRow = back.row
             $0.targetCol = back.col

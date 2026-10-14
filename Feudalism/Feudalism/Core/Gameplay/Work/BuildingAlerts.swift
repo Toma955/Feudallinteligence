@@ -98,8 +98,10 @@ extension GameState {
             && faction.map { !CandleRules.hasCandles(self, $0) } == true
         if dark { problems.append(.noCandle) }
         if !hasPath(to: placement, layer: layer), !dark { problems.append(.noPath) }
-        if state.worker == .none, !state.isOnFire { problems.append(.noWorker) }
-        guard let cycle = WorkCycleCatalog.cycle(for: placement.objectId), let faction else {
+        let needed = workersRequired(for: placement.objectId)
+        let have = workers(of: placement.id).count
+        if have < needed, !state.isOnFire { problems.append(.noWorker) }
+        guard let cycle = workCycle(for: placement), let faction else {
             return problems
         }
         let goldNeed = cycle.inputs[.gold] ?? 0

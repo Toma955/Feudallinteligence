@@ -1,0 +1,11 @@
+{
+  "_upute": "Po vrsti stabla: cut = potezi sječe, saw = piljenje u sječarnici, planks = daske u skladište, bananas = banane u smočnicu (palme). Palma je divlja — daje banane, ne daske.",
+  "zadano": { "cut": 8, "saw": 6, "planks": 10, "bananas": 0 },
+  "stabla": {
+    "object_oak": { "cut": 12, "saw": 8, "planks": 10, "bananas": 0 },
+    "object_fir": { "cut": 10, "saw": 6, "planks": 10, "bananas": 0 },
+    "object_cypress": { "cut": 9, "saw": 6, "planks": 10, "bananas": 0 },
+    "object_palm": { "cut": 8, "saw": 1, "planks": 0, "bananas": 4 },
+    "object_tree": { "cut": 8, "saw": 6, "planks": 10, "bananas": 0 }
+  }
+}

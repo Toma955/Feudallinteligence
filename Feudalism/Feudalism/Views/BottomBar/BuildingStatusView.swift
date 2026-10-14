@@ -25,7 +25,7 @@ struct BuildingStatusView: View {
 
     private func content(_ p: Placement, layer: MapLayer) -> some View {
         let state = gameState.buildingStates[p.id] ?? BuildingState()
-        let cycle = WorkCycleCatalog.cycle(for: p.objectId)
+        let cycle = gameState.workCycle(for: p)
         let faction = gameState.owner(of: p) ?? ""
         let mine = gameState.isOwnedByPlayer(p)
         let name = ObjectCatalog.shared.object(id: p.objectId)?.name ?? ""
@@ -49,6 +49,9 @@ struct BuildingStatusView: View {
                     }
                     .help("Spavanje šalje radnika vatri; novi ne dolazi dok se zgrada ne probudi.")
                 }
+            }
+            if mine, p.objectId == Windmill.objectId {
+                millGrainSwitch(placementId: p.id, selected: state.millGrain)
             }
             if mine, p.objectId == Training.objectId {
                 TrainingPanelView(faction: faction)
@@ -85,9 +88,18 @@ struct BuildingStatusView: View {
                     }
                 }
             }
-            if let cycle, problems.isEmpty, (!cycle.inputs.isEmpty || !cycle.outputs.isEmpty), state.hasWorkerInside, !state.isOnFire {
+            if let cycle, problems.isEmpty, (!cycle.inputs.isEmpty || !cycle.outputs.isEmpty), (state.hasWorkerInside || cycle.kind == .field), !state.isOnFire {
                 HStack(spacing: 12) {
-                    progressBar(state.progress / Double(cycle.durationTicks))
+                    let denom: Double = {
+                        guard cycle.kind == .field else { return Double(cycle.durationTicks) }
+                        switch state.fieldPhase {
+                        case .sowing: return GameState.FieldPhaseDuration.sow(cycle)
+                        case .growing: return GameState.FieldPhaseDuration.grow(cycle)
+                        case .harvesting: return GameState.FieldPhaseDuration.harvest(cycle)
+                        case .fallow: return 1
+                        }
+                    }()
+                    progressBar(state.progress / max(1, denom))
                     Text(cycleText(cycle, state: state))
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.75))
@@ -240,35 +252,63 @@ struct BuildingStatusView: View {
     }
 
     private func workerText(_ state: BuildingState, cycle: WorkCycle, placement: Placement, layer: MapLayer, faction: String) -> String {
+        let needed = gameState.workersRequired(for: placement.objectId)
+        let crew = gameState.workers(of: placement.id)
+        let have = crew.count
+        let crewLabel = needed > 1 ? " \(have)/\(needed)" : ""
         if state.isOnFire { return "Radnik je pobjegao" }
         if state.isClosed { return "Spava – radnik je otišao" }
-        switch state.worker {
-        case .none:
+        if have < needed {
             if gameState.buildingAlert(for: placement, layer: layer) == .noPath { return "Nema puta do građevine" }
             let free = gameState.peopleOf(faction: faction).filter { $0.role == .peasant }.count
-            return "Nema radnika (\(free) slobodnih)"
+            return "Treba\(crewLabel) radnika (\(free) slobodnih)"
+        }
+        switch state.worker {
+        case .none:
+            return "Treba\(crewLabel) radnika"
         case .walking(let left):
-            if let person = gameState.worker(of: placement.id) {
+            if let person = crew.first(where: {
+                switch $0.activity {
+                case .delivering, .fetching, .returningToWork, .walkingToTree, .chopping, .haulingLog,
+                     .walkingToWork, .walkingToField, .workingField:
+                    return true
+                default: return false
+                }
+            }) {
                 switch person.activity {
-                case .delivering: return "Nosi daske u skladište (\(left))"
-                case .fetching: return "Uzima sirovinu iz skladišta (\(left))"
-                case .returningToWork: return "Vraća se na posao (\(left))"
+                case .delivering: return "Nosi u skladište (\(left))\(crewLabel)"
+                case .fetching: return "Uzima sirovinu (\(left))\(crewLabel)"
+                case .returningToWork: return "Vraća se na posao (\(left))\(crewLabel)"
                 case .walkingToTree: return "Ide do stabla (\(left))"
                 case .chopping: return "Siječe stablo (\(left))"
                 case .haulingLog: return "Nosi deblo kući (\(left))"
+                case .walkingToField(_, let task): return "Ide na polje (\(task.displayName), \(left))"
+                case .workingField(_, let task): return "Na polju \(task.displayName) (\(left))"
                 default: break
                 }
             }
-            return "Radnik dolazi (\(left))"
+            return "Radnici dolaze (\(left))\(crewLabel)"
         case .inside:
             if state.waitingForStorage {
                 if let missing = gameState.missingStorage(for: cycle.outputs, of: faction) { return missing.missingText }
                 return gameState.fullStorage(for: cycle.outputs, of: faction)?.fullText ?? "Čeka mjesto u skladištu"
             }
-            if state.waitingForCandle { return "Čeka svijeću (košnica → vosak → svijeća)" }
+            if state.waitingForCandle { return "Čeka svijeću (farma cvijeća → vosak / svijeća)" }
             if state.waitingForTree { return "Nema stabla za sječu" }
-            if !state.pendingOutputs.isEmpty { return "Pili deblo u daske" }
-            return state.waitingForInput ? "Radnik čeka sirovine iz skladišta" : "Radnik je unutra"
+            if cycle.kind == .field {
+                switch state.fieldPhase {
+                case .fallow: return "Ugar — čeka proljeće\(crewLabel)"
+                case .sowing: return "Sjetva\(crewLabel)"
+                case .growing: return "Usjev raste\(crewLabel)"
+                case .harvesting:
+                    return state.pendingOutputs.isEmpty ? "Berba\(crewLabel)" : "Čeka odvoz u skladište\(crewLabel)"
+                }
+            }
+            if !state.pendingOutputs.isEmpty {
+                if state.pendingOutputs.keys.contains(.banana) { return "Sortira banane s palme" }
+                return "Pili deblo u daske"
+            }
+            return state.waitingForInput ? "Čeka sirovine iz skladišta\(crewLabel)" : "Posada unutra\(crewLabel)"
         }
     }
 
@@ -278,6 +318,9 @@ struct BuildingStatusView: View {
         let inputs = cycle.inputs.map { "\($0.value) \($0.key.displayName)" }.sorted().joined(separator: " + ")
         let outputs = cycle.outputs.map { "\($0.value) \($0.key.displayName)" }.sorted().joined(separator: " + ")
         let recipe = inputs.isEmpty ? "→ \(outputs)" : "\(inputs) → \(outputs)"
+        if cycle.kind == .field {
+            return "\(recipe) · \(season.displayName) · \(state.fieldPhase.displayName) · žetvi \(state.cyclesCompleted)"
+        }
         return "\(recipe) · \(season.displayName) ×\(String(format: "%.1f", factor)) · ciklusa \(state.cyclesCompleted)"
     }
 
@@ -350,6 +393,30 @@ struct BuildingStatusView: View {
                     }
                 }
             }
+        }
+    }
+
+    private func millGrainSwitch(placementId: String, selected: MillGrain) -> some View {
+        HStack(spacing: 8) {
+            Text("Melje")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.7))
+            ForEach(MillGrain.allCases, id: \.self) { grain in
+                Button {
+                    gameState.setMillGrain(placementId: placementId, grain: grain)
+                } label: {
+                    Text(grain.displayName)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(selected == grain ? .black : .white.opacity(0.9))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(selected == grain ? Color.yellow.opacity(0.85) : Color.white.opacity(0.12), in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+            Text("→ brašno")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.55))
         }
     }
 
@@ -513,8 +580,11 @@ private struct MarketStockPanel: View {
         case .bread: return "bread_resource"
         case .hay: return "hay_resource"
         case .apple: return "apple_resource"
+        case .banana: return "banana_resource"
+        case .honey: return "honey_resource"
         case .cheese: return "cheese_resource"
         case .meat: return "meat_resouce"
+        case .chicken: return "chicken_resource"
         case .sausages: return "sosages_resouce"
         case .vegetables: return "vegetables_resource"
         case .wine: return "vine_resources"

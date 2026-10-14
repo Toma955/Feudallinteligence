@@ -36,16 +36,12 @@ enum MapCreationRules {
     }
 
     // MARK: - Podzemna mapa
-    /// Veličina podzemne mape u „kockama zida” – mapa ispod glavne. 1 kocka = veličina zida (jedna prostorna jedinica 40×40 u world).
-    /// Podzemna mapa je 10 kockaka (u jedinicama zida).
-    static let undergroundMapSizeInWallCubes: Int = 10
+    /// Podzemlje je istih dimenzija kao nadzemlje; nova mapa je 100 % popunjena (`UndergroundTerrain.filledHeight`).
+    static func makeUndergroundGameMap(matching surface: GameMap) -> GameMap {
+        GameMap.makeFilledUnderground(rows: surface.rows, cols: surface.cols)
+    }
 
-    /// Broj ćelija (1×1) za podzemnu mapu po strani: 10×10 (jedna kocka zida = 1 ćelija).
-    static var undergroundMapSideInCells: Int { undergroundMapSizeInWallCubes }
-
-    /// Kreira GameMap za podzemnu mapu (ispod glavne) – 10×10 ćelija (10 kockaka veličine zida).
-    static func makeUndergroundGameMap() -> GameMap {
-        let side = undergroundMapSideInCells
-        return GameMap(rows: side, cols: side)
+    static func makeUndergroundGameMap(rows: Int, cols: Int) -> GameMap {
+        GameMap.makeFilledUnderground(rows: rows, cols: cols)
     }
 }

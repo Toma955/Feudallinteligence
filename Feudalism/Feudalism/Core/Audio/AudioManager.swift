@@ -22,8 +22,13 @@ final class AudioManager: ObservableObject {
 
     private var mapMusicPlayer: AVAudioPlayer?
     private var introSoundtrackPlayer: AVAudioPlayer?
+    private var fireLoopPlayer: AVAudioPlayer?
     private var soundPlayers: [String: AVAudioPlayer] = [:]
     private let speechSynthesizer = AVSpeechSynthesizer()
+
+    /// Imena datoteka vatre u Core/Audio/Fire.
+    static let fireStartName = "fire_start"
+    static let fireLoopName = "fire_loop"
 
     private init() {}
 
@@ -98,13 +103,7 @@ final class AudioManager: ObservableObject {
     }
 
     private func urlForIntroSoundtrack() -> URL? {
-        let bundle = Bundle.main
-        for ext in Self.introSoundtrackExtensions {
-            if let url = bundle.url(forResource: Self.introSoundtrackName, withExtension: ext) {
-                return url
-            }
-        }
-        return nil
+        urlForSound(named: Self.introSoundtrackName)
     }
 
     /// Ažuriraj glasnoću trenutno puštane muzike mape (npr. kad korisnik mijenja Postavke → Audio).
@@ -113,38 +112,38 @@ final class AudioManager: ObservableObject {
     }
 
     private func urlForMapMusic() -> URL? {
-        let bundle = Bundle.main
-        for ext in Self.mapMusicExtensions {
-            if let url = bundle.url(forResource: Self.mapMusicAssetName, withExtension: ext) {
-                return url
-            }
-        }
-        return nil
+        urlForSound(named: Self.mapMusicAssetName)
     }
 
     // MARK: - Zvukovi
 
-    /// Podmape u bundleu u kojima tražiti zvuk (npr. place.wav u Audio ili Core/Audio).
-    private static let soundSubdirectories = ["Audio", "Core/Audio", "Feudalism/Core/Audio", nil as String?]
+    /// Podmape u bundleu (Core/Audio/…). Redoslijed: specifične mape pa korijen.
+    private static let soundSubdirectories: [String?] = [
+        "Core/Audio/Fire",
+        "Core/Audio/UI",
+        "Core/Audio/Music",
+        "Core/Audio/Buildings",
+        "Core/Audio/Nature",
+        "Core/Audio/Combat",
+        "Core/Audio/People",
+        "Core/Audio/Seasons",
+        "Core/Audio",
+        "Feudalism/Core/Audio/Fire",
+        "Feudalism/Core/Audio/UI",
+        "Feudalism/Core/Audio/Music",
+        "Feudalism/Core/Audio/Buildings",
+        "Feudalism/Core/Audio/Nature",
+        "Feudalism/Core/Audio/Combat",
+        "Feudalism/Core/Audio/People",
+        "Feudalism/Core/Audio/Seasons",
+        "Feudalism/Core/Audio",
+        "Audio",
+        nil
+    ]
 
     /// Reproduciraj zvuk iz bundlea (npr. "place" → place.wav u folderu Audio). volume 0...1; ako nije proslijeđen, koristi 0.8.
     func playSound(named name: String, volume: Double = 0.8) {
-        let bundle = Bundle.main
-        let exts = ["wav", "mp3", "m4a"]
-        var url: URL?
-        for sub in Self.soundSubdirectories {
-            for ext in exts {
-                if let u = sub != nil
-                    ? bundle.url(forResource: name, withExtension: ext, subdirectory: sub)
-                    : bundle.url(forResource: name, withExtension: ext) {
-                    url = u
-                    break
-                }
-            }
-            if url != nil { break }
-        }
-        guard let url = url else { return }
-        guard volume > 0.01 else { return }
+        guard volume > 0.01, let url = urlForSound(named: name) else { return }
         do {
             let player = try AVAudioPlayer(contentsOf: url)
             player.volume = Float(volume)
@@ -157,6 +156,68 @@ final class AudioManager: ObservableObject {
         } catch {
             soundPlayers.removeValue(forKey: name)
         }
+    }
+
+    private func urlForSound(named name: String) -> URL? {
+        let bundle = Bundle.main
+        let exts = ["wav", "mp3", "m4a"]
+        for sub in Self.soundSubdirectories {
+            for ext in exts {
+                if let u = sub != nil
+                    ? bundle.url(forResource: name, withExtension: ext, subdirectory: sub)
+                    : bundle.url(forResource: name, withExtension: ext) {
+                    return u
+                }
+            }
+        }
+        return nil
+    }
+
+    // MARK: - Vatra (petlja dok nešto gori)
+
+    /// Pokreni ili zaustavi ambijent vatre. `burning` = postoji li barem jedna zapaljena građevina.
+    func syncFireAmbience(burning: Bool, volume: Double, playIgnite: Bool = false) {
+        if playIgnite, burning {
+            playSound(named: Self.fireStartName, volume: volume)
+        }
+        if burning, volume > 0.01 {
+            startFireLoop(volume: volume)
+        } else {
+            stopFireLoop()
+        }
+    }
+
+    func updateFireLoopVolume(volume: Double) {
+        guard let player = fireLoopPlayer else { return }
+        if volume <= 0.01 {
+            stopFireLoop()
+        } else {
+            player.volume = Float(min(1, max(0, volume)))
+        }
+    }
+
+    private func startFireLoop(volume: Double) {
+        if let player = fireLoopPlayer, player.isPlaying {
+            player.volume = Float(volume)
+            return
+        }
+        stopFireLoop()
+        guard let url = urlForSound(named: Self.fireLoopName) else { return }
+        do {
+            let player = try AVAudioPlayer(contentsOf: url)
+            player.numberOfLoops = -1
+            player.volume = Float(volume)
+            player.prepareToPlay()
+            player.play()
+            fireLoopPlayer = player
+        } catch {
+            fireLoopPlayer = nil
+        }
+    }
+
+    func stopFireLoop() {
+        fireLoopPlayer?.stop()
+        fireLoopPlayer = nil
     }
 
     // MARK: - Govor (TTS)

@@ -117,6 +117,7 @@ enum MapGenerator {
             let cells = GameMap.makeGrid(rows: rows, cols: cols)
             let vertexHeights = GameMap.makeInitialVertexHeights(rows: rows, cols: cols)
             let gameMap = GameMap(rows: rows, cols: cols, cells: cells, vertexHeights: vertexHeights)
+            let underground = GameMap.makeFilledUnderground(rows: rows, cols: cols)
             let vertexHeightsDouble = Dictionary(uniqueKeysWithValues: vertexHeights.map { ($0.key, Double($0.value)) })
             let data = MapEditorSaveData(
                 mapName: nameTrimmed,
@@ -127,7 +128,8 @@ enum MapGenerator {
                 createdDate: Date(),
                 originOffsetX: 0,
                 originOffsetZ: 0,
-                vertexHeights: vertexHeightsDouble
+                vertexHeights: vertexHeightsDouble,
+                undergroundVertexHeights: MapEditorSaveData.encodeHeights(underground.vertexHeights)
             )
             let fileName = MapStorage.fileName(forMapName: nameTrimmed, slotFallback: slot)
             guard let fileURL = MapStorage.fileURL(side: side, fileName: fileName) else {

@@ -10,8 +10,8 @@ import SceneKit
 import AppKit
 
 enum Underground {
-    /// Metri između tla i poda podzemlja.
-    static let depthMeters: CGFloat = 10
+    /// Metri između tla i poda podzemlja (= potpuno popunjena podzemna visina).
+    static let depthMeters: CGFloat = UndergroundTerrain.filledHeight
     /// Prozirnost površine dok se gradi dolje.
     static let surfaceOpacity: CGFloat = 0.15
     /// Metri po jednom ponavljanju teksture stijene.

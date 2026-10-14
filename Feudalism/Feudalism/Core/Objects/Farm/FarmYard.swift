@@ -5,7 +5,7 @@
 //  Polazni tlocrt svih farmi: 5×5.
 //  Četiri polja 2×2 s mini L-ogradom na vanjskom kutu, između njih križ širine 1.
 //  Na polju 4 (donje desno) stoji mala gospodarska zgrada.
-//  Podloga je crna zemlja. Pšenica i voćnjak dodaju usjev na polja 1–3.
+//  Podloga je crna zemlja. Pšenica, kukuruz, povrće, vinograd i jabuke dodaju usjev na polja 1–3.
 //
 //    1 1 | 2 2
 //    1 1 | 2 2
@@ -26,6 +26,10 @@ enum FarmYard {
     enum Crop {
         case soil
         case wheat
+        case corn
+        case vegetables
+        case grapes
+        case flowers
         case apple
     }
 
@@ -38,6 +42,26 @@ enum FarmYard {
     static let wheatStem = NSColor(red: 0.42, green: 0.48, blue: 0.16, alpha: 1)
     static let wheatHead = NSColor(red: 0.86, green: 0.70, blue: 0.22, alpha: 1)
     static let wheatHeadRipe = NSColor(red: 0.78, green: 0.58, blue: 0.16, alpha: 1)
+    static let cornStem = NSColor(red: 0.28, green: 0.52, blue: 0.14, alpha: 1)
+    static let cornLeaf = NSColor(red: 0.34, green: 0.58, blue: 0.16, alpha: 1)
+    static let cornEar = NSColor(red: 0.90, green: 0.72, blue: 0.18, alpha: 1)
+    static let cornSilk = NSColor(red: 0.72, green: 0.62, blue: 0.28, alpha: 1)
+    static let vegLeaf = NSColor(red: 0.22, green: 0.55, blue: 0.18, alpha: 1)
+    static let vegLeafDark = NSColor(red: 0.14, green: 0.40, blue: 0.12, alpha: 1)
+    static let vegCabbage = NSColor(red: 0.45, green: 0.62, blue: 0.28, alpha: 1)
+    static let vegCarrot = NSColor(red: 0.88, green: 0.42, blue: 0.12, alpha: 1)
+    static let vegTomato = NSColor(red: 0.78, green: 0.16, blue: 0.12, alpha: 1)
+    static let vinePost = NSColor(red: 0.40, green: 0.26, blue: 0.14, alpha: 1)
+    static let vineLeaf = NSColor(red: 0.24, green: 0.48, blue: 0.18, alpha: 1)
+    static let vineLeafDark = NSColor(red: 0.16, green: 0.36, blue: 0.14, alpha: 1)
+    static let grapePurple = NSColor(red: 0.42, green: 0.12, blue: 0.42, alpha: 1)
+    static let grapeDeep = NSColor(red: 0.28, green: 0.06, blue: 0.30, alpha: 1)
+    static let flowerPink = NSColor(red: 0.82, green: 0.28, blue: 0.48, alpha: 1)
+    static let flowerYellow = NSColor(red: 0.92, green: 0.72, blue: 0.18, alpha: 1)
+    static let flowerPurple = NSColor(red: 0.52, green: 0.28, blue: 0.72, alpha: 1)
+    static let flowerWhite = NSColor(red: 0.92, green: 0.90, blue: 0.86, alpha: 1)
+    static let hiveWood = NSColor(red: 0.72, green: 0.52, blue: 0.22, alpha: 1)
+    static let hiveWoodDark = NSColor(red: 0.48, green: 0.32, blue: 0.14, alpha: 1)
     static let appleBark = NSColor(red: 0.32, green: 0.20, blue: 0.12, alpha: 1)
     static let appleLeaf = NSColor(red: 0.22, green: 0.46, blue: 0.16, alpha: 1)
     static let appleLeafDark = NSColor(red: 0.14, green: 0.34, blue: 0.12, alpha: 1)
@@ -118,9 +142,20 @@ enum FarmYard {
                 break
             case .wheat:
                 addWheat(to: cropRoot, origin: origin, plotW: plotW, step: step, plotIndex: index)
+            case .corn:
+                addCorn(to: cropRoot, origin: origin, plotW: plotW, step: step, plotIndex: index)
+            case .vegetables:
+                addVegetables(to: cropRoot, origin: origin, plotW: plotW, step: step, plotIndex: index)
+            case .grapes:
+                addVineyard(to: cropRoot, origin: origin, plotW: plotW, step: step, plotIndex: index)
+            case .flowers:
+                addFlowerBeds(to: cropRoot, origin: origin, plotW: plotW, step: step, plotIndex: index)
             case .apple:
                 addAppleTrees(to: cropRoot, origin: origin, plotW: plotW, step: step, plotIndex: index)
             }
+        }
+        if crop == .flowers {
+            addBeeHives(to: cropRoot, shedYard: plotCenter(localCol: 3.5, localRow: 3.5), step: step)
         }
         container.addChildNode(cropRoot)
         return container
@@ -161,6 +196,287 @@ enum FarmYard {
                 headNode.eulerAngles = stemNode.eulerAngles
                 root.addChildNode(headNode)
             }
+        }
+    }
+
+    /// Visoki kukuruz: stabljike, listovi i klipovi.
+    private static func addCorn(to root: SCNNode, origin: SCNVector3, plotW: CGFloat, step: CGFloat, plotIndex: Int) {
+        let stemMat = material(cornStem)
+        let leafMat = material(cornLeaf)
+        let earMat = material(cornEar)
+        let silkMat = material(cornSilk)
+        let cols = 7
+        let rows = 7
+        let inset = plotW * 0.12
+        let span = plotW - inset * 2
+        for r in 0..<rows {
+            for c in 0..<cols {
+                let u = CGFloat(c) / CGFloat(max(1, cols - 1))
+                let v = CGFloat(r) / CGFloat(max(1, rows - 1))
+                let jitterX = (unit(plotIndex, c, r) - 0.5) * step * 0.06
+                let jitterZ = (unit(plotIndex, r, c + 2) - 0.5) * step * 0.06
+                let x = origin.x - span / 2 + u * span + jitterX
+                let z = origin.z - span / 2 + v * span + jitterZ
+                let h = step * (0.55 + unit(plotIndex, c + 3, r + 5) * 0.35)
+                let stem = SCNCylinder(radius: step * 0.028, height: h)
+                stem.radialSegmentCount = 5
+                stem.materials = [stemMat]
+                let stemNode = SCNNode(geometry: stem)
+                stemNode.position = SCNVector3(x, h / 2, z)
+                stemNode.eulerAngles.z = (unit(plotIndex, c, r + 8) - 0.5) * 0.12
+                root.addChildNode(stemNode)
+
+                for side in [-1.0, 1.0] as [CGFloat] {
+                    let leaf = SCNBox(width: step * 0.22, height: step * 0.04, length: step * 0.08, chamferRadius: 0)
+                    leaf.materials = [leafMat]
+                    let leafNode = SCNNode(geometry: leaf)
+                    leafNode.position = SCNVector3(x + side * step * 0.08, h * 0.55, z)
+                    leafNode.eulerAngles.z = side * 0.55
+                    leafNode.eulerAngles.y = (unit(plotIndex, c + 1, r) - 0.5) * 0.4
+                    root.addChildNode(leafNode)
+                }
+
+                let ear = SCNCapsule(capRadius: step * 0.035, height: step * 0.16)
+                ear.materials = [earMat]
+                let earNode = SCNNode(geometry: ear)
+                earNode.position = SCNVector3(x + step * 0.05, h * 0.72, z)
+                earNode.eulerAngles.z = 0.35
+                root.addChildNode(earNode)
+
+                let silk = SCNCone(topRadius: 0, bottomRadius: step * 0.02, height: step * 0.08)
+                silk.materials = [silkMat]
+                let silkNode = SCNNode(geometry: silk)
+                silkNode.position = SCNVector3(x + step * 0.05, h * 0.72 + step * 0.10, z)
+                root.addChildNode(silkNode)
+            }
+        }
+    }
+
+    /// Gredice: kupus, mrkva, rajčica / lisnato povrće.
+    private static func addVegetables(to root: SCNNode, origin: SCNVector3, plotW: CGFloat, step: CGFloat, plotIndex: Int) {
+        let leafMat = material(vegLeaf)
+        let leafDark = material(vegLeafDark)
+        let cabbageMat = material(vegCabbage)
+        let carrotMat = material(vegCarrot)
+        let tomatoMat = material(vegTomato)
+        let rows = 4
+        let cols = 5
+        let inset = plotW * 0.14
+        let span = plotW - inset * 2
+        for r in 0..<rows {
+            for c in 0..<cols {
+                let u = CGFloat(c) / CGFloat(max(1, cols - 1))
+                let v = CGFloat(r) / CGFloat(max(1, rows - 1))
+                let x = origin.x - span / 2 + u * span
+                let z = origin.z - span / 2 + v * span
+                let kind = Int(unit(plotIndex, c + r * 3, r + 2) * 3)
+                switch kind {
+                case 0:
+                    let head = SCNSphere(radius: step * (0.10 + unit(plotIndex, c, r) * 0.04))
+                    head.segmentCount = 8
+                    head.materials = [cabbageMat]
+                    let node = SCNNode(geometry: head)
+                    node.position = SCNVector3(x, step * 0.12, z)
+                    node.scale = SCNVector3(1.15, 0.85, 1.15)
+                    root.addChildNode(node)
+                    let fringe = SCNSphere(radius: step * 0.14)
+                    fringe.segmentCount = 6
+                    fringe.materials = [leafDark]
+                    let fringeNode = SCNNode(geometry: fringe)
+                    fringeNode.position = SCNVector3(x, step * 0.08, z)
+                    fringeNode.scale = SCNVector3(1.3, 0.35, 1.3)
+                    root.addChildNode(fringeNode)
+                case 1:
+                    let top = SCNCone(topRadius: 0, bottomRadius: step * 0.06, height: step * 0.10)
+                    top.materials = [leafMat]
+                    let topNode = SCNNode(geometry: top)
+                    topNode.position = SCNVector3(x, step * 0.16, z)
+                    root.addChildNode(topNode)
+                    let rootVeg = SCNCone(topRadius: step * 0.012, bottomRadius: step * 0.04, height: step * 0.14)
+                    rootVeg.materials = [carrotMat]
+                    let rootNode = SCNNode(geometry: rootVeg)
+                    rootNode.position = SCNVector3(x, step * 0.08, z)
+                    rootNode.eulerAngles.x = .pi
+                    root.addChildNode(rootNode)
+                default:
+                    let stake = SCNCylinder(radius: step * 0.012, height: step * 0.32)
+                    stake.materials = [material(fenceColor)]
+                    let stakeNode = SCNNode(geometry: stake)
+                    stakeNode.position = SCNVector3(x, step * 0.18, z)
+                    root.addChildNode(stakeNode)
+                    for t in 0..<3 {
+                        let tomato = SCNSphere(radius: step * 0.04)
+                        tomato.segmentCount = 6
+                        tomato.materials = [tomatoMat]
+                        let tNode = SCNNode(geometry: tomato)
+                        let ang = CGFloat(t) * 2.1
+                        tNode.position = SCNVector3(
+                            x + cos(ang) * step * 0.05,
+                            step * (0.14 + CGFloat(t) * 0.07),
+                            z + sin(ang) * step * 0.05
+                        )
+                        root.addChildNode(tNode)
+                    }
+                    let bush = SCNSphere(radius: step * 0.08)
+                    bush.segmentCount = 6
+                    bush.materials = [leafMat]
+                    let bushNode = SCNNode(geometry: bush)
+                    bushNode.position = SCNVector3(x, step * 0.20, z)
+                    bushNode.scale = SCNVector3(1.2, 0.7, 1.2)
+                    root.addChildNode(bushNode)
+                }
+            }
+        }
+    }
+
+    /// Vinograd: redovi stupova s lozom i grozdovima.
+    private static func addVineyard(to root: SCNNode, origin: SCNVector3, plotW: CGFloat, step: CGFloat, plotIndex: Int) {
+        let postMat = material(vinePost)
+        let leafMat = material(vineLeaf)
+        let leafDark = material(vineLeafDark)
+        let grapeMat = material(grapePurple)
+        let grapeDeepMat = material(grapeDeep)
+        let rowCount = 3
+        let postsPerRow = 4
+        let inset = plotW * 0.16
+        let span = plotW - inset * 2
+        for row in 0..<rowCount {
+            let v = CGFloat(row) / CGFloat(max(1, rowCount - 1))
+            let z = origin.z - span / 2 + v * span
+            var postTops: [SCNVector3] = []
+            for col in 0..<postsPerRow {
+                let u = CGFloat(col) / CGFloat(max(1, postsPerRow - 1))
+                let x = origin.x - span / 2 + u * span
+                let postH = step * (0.55 + unit(plotIndex, row, col) * 0.08)
+                let post = SCNCylinder(radius: step * 0.035, height: postH)
+                post.radialSegmentCount = 5
+                post.materials = [postMat]
+                let postNode = SCNNode(geometry: post)
+                postNode.position = SCNVector3(x, postH / 2, z)
+                root.addChildNode(postNode)
+                postTops.append(SCNVector3(x, postH * 0.85, z))
+
+                // Loza oko stupa.
+                for band in 0..<3 {
+                    let vine = SCNTorus(ringRadius: step * 0.06, pipeRadius: step * 0.015)
+                    vine.ringSegmentCount = 8
+                    vine.pipeSegmentCount = 4
+                    vine.materials = [band % 2 == 0 ? leafMat : leafDark]
+                    let vineNode = SCNNode(geometry: vine)
+                    vineNode.eulerAngles.x = .pi / 2
+                    vineNode.position = SCNVector3(x, postH * (0.35 + CGFloat(band) * 0.18), z)
+                    vineNode.scale = SCNVector3(1, 0.6, 1)
+                    root.addChildNode(vineNode)
+                }
+
+                // Grozdovi.
+                for g in 0..<2 {
+                    let cluster = SCNNode()
+                    let gx = x + (g == 0 ? -1 : 1) * step * 0.07
+                    let gy = postH * (0.45 + unit(plotIndex, row + g, col) * 0.2)
+                    for berry in 0..<6 {
+                        let br = SCNSphere(radius: step * 0.028)
+                        br.segmentCount = 5
+                        br.materials = [berry % 2 == 0 ? grapeMat : grapeDeepMat]
+                        let bNode = SCNNode(geometry: br)
+                        let a = CGFloat(berry) * 0.9
+                        bNode.position = SCNVector3(
+                            cos(a) * step * 0.025,
+                            -CGFloat(berry) * step * 0.018,
+                            sin(a) * step * 0.025
+                        )
+                        cluster.addChildNode(bNode)
+                    }
+                    cluster.position = SCNVector3(gx, gy, z + step * 0.02)
+                    root.addChildNode(cluster)
+                }
+            }
+            // Žica / loza između stupova.
+            if postTops.count >= 2 {
+                for i in 0..<(postTops.count - 1) {
+                    let a = postTops[i]
+                    let b = postTops[i + 1]
+                    let dx = b.x - a.x
+                    let dz = b.z - a.z
+                    let len = hypot(dx, dz)
+                    let wire = SCNBox(width: len, height: step * 0.02, length: step * 0.02, chamferRadius: 0)
+                    wire.materials = [leafDark]
+                    let wireNode = SCNNode(geometry: wire)
+                    wireNode.position = SCNVector3((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2)
+                    wireNode.eulerAngles.y = atan2(dx, dz) - .pi / 2
+                    root.addChildNode(wireNode)
+
+                    let foliage = SCNBox(width: len * 0.9, height: step * 0.10, length: step * 0.12, chamferRadius: 0)
+                    foliage.materials = [leafMat]
+                    let foliageNode = SCNNode(geometry: foliage)
+                    foliageNode.position = SCNVector3((a.x + b.x) / 2, (a.y + b.y) / 2 - step * 0.04, (a.z + b.z) / 2)
+                    foliageNode.eulerAngles.y = wireNode.eulerAngles.y
+                    root.addChildNode(foliageNode)
+                }
+            }
+        }
+    }
+
+    /// Gredice cvijeća.
+    private static func addFlowerBeds(to root: SCNNode, origin: SCNVector3, plotW: CGFloat, step: CGFloat, plotIndex: Int) {
+        let colors = [flowerPink, flowerYellow, flowerPurple, flowerWhite].map(material)
+        let stemMat = material(vegLeaf)
+        let cols = 6
+        let rows = 6
+        let inset = plotW * 0.12
+        let span = plotW - inset * 2
+        for r in 0..<rows {
+            for c in 0..<cols {
+                let u = CGFloat(c) / CGFloat(max(1, cols - 1))
+                let v = CGFloat(r) / CGFloat(max(1, rows - 1))
+                let x = origin.x - span / 2 + u * span + (unit(plotIndex, c, r) - 0.5) * step * 0.04
+                let z = origin.z - span / 2 + v * span + (unit(plotIndex, r, c) - 0.5) * step * 0.04
+                let stemH = step * (0.10 + unit(plotIndex, c + 2, r) * 0.08)
+                let stem = SCNCylinder(radius: step * 0.012, height: stemH)
+                stem.materials = [stemMat]
+                let stemNode = SCNNode(geometry: stem)
+                stemNode.position = SCNVector3(x, stemH / 2, z)
+                root.addChildNode(stemNode)
+
+                let bloom = SCNSphere(radius: step * (0.04 + unit(plotIndex, c, r + 3) * 0.025))
+                bloom.segmentCount = 6
+                bloom.materials = [colors[(c + r + plotIndex) % colors.count]]
+                let bloomNode = SCNNode(geometry: bloom)
+                bloomNode.position = SCNVector3(x, stemH + step * 0.03, z)
+                bloomNode.scale = SCNVector3(1.2, 0.7, 1.2)
+                root.addChildNode(bloomNode)
+            }
+        }
+    }
+
+    /// Košnice uz gospodarsku zgradu (farma cvijeća).
+    private static func addBeeHives(to root: SCNNode, shedYard: SCNVector3, step: CGFloat) {
+        let wood = material(hiveWood)
+        let woodDark = material(hiveWoodDark)
+        let spots: [(CGFloat, CGFloat)] = [(-0.55, -0.35), (-0.15, -0.55), (0.35, -0.40)]
+        for (i, spot) in spots.enumerated() {
+            let hive = SCNNode()
+            let w = step * 0.28
+            let d = step * 0.22
+            for level in 0..<3 {
+                let box = SCNBox(width: w * (1 - CGFloat(level) * 0.08), height: step * 0.12, length: d * (1 - CGFloat(level) * 0.08), chamferRadius: 0)
+                box.materials = [level % 2 == 0 ? wood : woodDark]
+                let node = SCNNode(geometry: box)
+                node.position.y = step * 0.08 + CGFloat(level) * step * 0.12
+                hive.addChildNode(node)
+            }
+            let lid = SCNBox(width: w * 1.1, height: step * 0.04, length: d * 1.15, chamferRadius: 0)
+            lid.materials = [woodDark]
+            let lidNode = SCNNode(geometry: lid)
+            lidNode.position.y = step * 0.42
+            hive.addChildNode(lidNode)
+            hive.position = SCNVector3(
+                shedYard.x + spot.0 * step,
+                0,
+                shedYard.z + spot.1 * step
+            )
+            hive.eulerAngles.y = CGFloat(i) * 0.15
+            root.addChildNode(hive)
         }
     }
 

@@ -29,9 +29,11 @@ struct MapEditorChoiceView: View {
 
     var body: some View {
         Group {
-            if showCreateNameStep, let preset = selectedPresetForCreate {
-                createNameContent(preset: preset)
-            } else if let slot = mapPickerSlot {
+            // Zakomentirano: korak unosa imena mape (showCreateNameStep).
+            // if showCreateNameStep, let preset = selectedPresetForCreate {
+            //     createNameContent(preset: preset)
+            // } else
+            if let slot = mapPickerSlot {
                 mapPickerContent(slot: slot)
             } else if showDimensionPicker {
                 dimensionPickerContent
@@ -96,9 +98,13 @@ struct MapEditorChoiceView: View {
             VStack(spacing: 12) {
                 ForEach(MapSizePreset.allCases, id: \.id) { preset in
                     Button {
-                        selectedPresetForCreate = preset
-                        showCreateNameStep = true
-                        createMapName = ""
+                        // Zakomentirano: unos imena — odmah generiraj mapu.
+                        // selectedPresetForCreate = preset
+                        // showCreateNameStep = true
+                        // createMapName = ""
+                        gameState.createMapAndOpenEditor(name: "Mapa", side: preset.side) { success in
+                            if success { isPresented = false }
+                        }
                     } label: {
                         Text(preset.rawValue)
                             .font(.system(size: 16, weight: .medium))
@@ -147,10 +153,14 @@ struct MapEditorChoiceView: View {
             VStack(spacing: 12) {
                 ForEach(MapSizePreset.allCases, id: \.id) { preset in
                     Button {
-                        selectedPresetForCreate = preset
-                        showDimensionPicker = false
-                        showCreateNameStep = true
-                        createMapName = ""
+                        // Zakomentirano: unos imena — odmah generiraj mapu.
+                        // selectedPresetForCreate = preset
+                        // showDimensionPicker = false
+                        // showCreateNameStep = true
+                        // createMapName = ""
+                        gameState.createMapAndOpenEditor(name: "Mapa", side: preset.side) { success in
+                            if success { isPresented = false }
+                        }
                     } label: {
                         Text(preset.rawValue)
                             .font(.system(size: 16, weight: .medium))
@@ -251,7 +261,8 @@ struct MapEditorChoiceView: View {
         .padding(32)
     }
 
-    /// Korak 3: naziv mape (obavezan) → Generiraj.
+    /*
+    /// Korak 3: naziv mape (obavezan) → Generiraj. (Zakomentirano — Map Editor ide odmah na mapu.)
     private func createNameContent(preset: MapSizePreset) -> some View {
         VStack(spacing: 28) {
             HStack {
@@ -314,6 +325,7 @@ struct MapEditorChoiceView: View {
         }
         .padding(32)
     }
+    */
 }
 
 #Preview {

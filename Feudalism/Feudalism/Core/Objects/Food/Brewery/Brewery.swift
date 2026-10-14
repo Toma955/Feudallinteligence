@@ -2,7 +2,7 @@
 //  Brewery.swift
 //  Feudalism
 //
-//  Pivovara – placeholder 5×5×4. Kategorija: hrana.
+//  Pivovara – 4×4 metra. Kategorija: hrana.
 //
 
 import Foundation

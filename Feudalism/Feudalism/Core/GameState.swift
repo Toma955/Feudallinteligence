@@ -327,13 +327,75 @@ final class GameState: ObservableObject {
         return undergroundMap.placements
     }
 
+    /// Visine podzemlja za spremanje (10 = 100 % popunjeno).
+    private var savedUndergroundVertexHeights: [String: Double]? {
+        guard undergroundMap.rows == gameMap.rows, undergroundMap.cols == gameMap.cols else { return nil }
+        return MapEditorSaveData.encodeHeights(undergroundMap.vertexHeights)
+    }
+
     private func ensureUndergroundMap() {
         guard undergroundMap.rows != gameMap.rows || undergroundMap.cols != gameMap.cols else { return }
-        undergroundMap = GameMap(rows: gameMap.rows, cols: gameMap.cols, cells: [:], vertexHeights: [:])
+        undergroundMap = GameMap.makeFilledUnderground(rows: gameMap.rows, cols: gameMap.cols)
+    }
+
+    /// Primijeni podzemni sloj iz savea; bez spremljenih visina → 100 % popunjeno (visina 10).
+    private func applyUndergroundLayer(from data: MapEditorSaveData) {
+        ensureUndergroundMap()
+        if let vh = data.undergroundVertexHeights, !vh.isEmpty {
+            undergroundMap.replaceVertexHeights(Dictionary(uniqueKeysWithValues: vh.map { ($0.key, CGFloat($0.value)) }))
+        }
+        undergroundMap.replacePlacements(data.undergroundPlacements ?? [])
+        syncUndergroundWaterOccupation()
+    }
+
+    /// More / rijeka / izvor → podzemlje visine 10, ispunjeno morem ili rijekom.
+    func syncUndergroundWaterOccupation(at coordinates: [MapCoordinate]? = nil) {
+        ensureUndergroundMap()
+        let springCells: Set<MapCoordinate> = Set(
+            gameMap.placements
+                .filter { $0.objectId == Spring.objectId }
+                .flatMap { $0.coveredCoordinates() }
+        )
+        let targets = coordinates ?? gameMap.allCoordinates()
+        for coord in targets {
+            guard gameMap.isValid(coord), undergroundMap.isValid(coord) else { continue }
+            let surface = gameMap.cell(at: coord)?.povrsina ?? .tlo
+            let underSpring = springCells.contains(coord)
+            if let water = UndergroundTerrain.waterOccupation(surface: surface, underSpring: underSpring) {
+                // More: šuplje korito (visina 0 + vizualni dno/bokovi). Rijeka/izvor: i dalje puno na 10.
+                let fill: CGFloat = (water == .more) ? 0 : UndergroundTerrain.filledHeight
+                undergroundMap.setUndergroundFill(at: coord, surface: water, fillHeight: fill)
+            } else if let current = undergroundMap.cell(at: coord)?.povrsina, current == .more || current == .voda {
+                undergroundMap.setUndergroundFill(at: coord, surface: .tlo)
+            }
+        }
+        // Verziju diže pozivatelj (paintPad / bumpEditorCellsVersion) — ne ovdje.
+    }
+
+    /// Namjesti protok izvora (izvor se ne briše / ne miče).
+    func setSpringFlow(placementId: String, flow: Double) {
+        guard let p = gameMap.placements.first(where: { $0.id == placementId }),
+              p.objectId == Spring.objectId else { return }
+        var state = buildingStates[placementId] ?? BuildingState()
+        state.springFlow = max(0, flow)
+        buildingStates[placementId] = state
+        objectWillChange.send()
     }
 
     /// Raste kad editor promijeni teren, naslage, podloge ili kretanje ćelija (za osvježavanje prikaza).
-    @Published var editorCellsVersion = 0
+    /// Nije @Published — sync publish usred paint/drag → NSHostingView reentrancy.
+    private(set) var editorCellsVersion = 0
+    /// Debounce za auto-spremanje mape u Map Editoru (ne treba ručno Spremi nakon svake izmjene).
+    private var editorMapAutoSaveWorkItem: DispatchWorkItem?
+
+    /// Povećaj verziju terena; objectWillChange tek u sljedećem turnu (sigurno za SwiftUI).
+    func bumpEditorCellsVersion() {
+        editorCellsVersion += 1
+        scheduleEditorMapAutoSave()
+        DispatchQueue.main.async { [weak self] in
+            self?.objectWillChange.send()
+        }
+    }
 
     private var groundwaterCache: (map: ObjectIdentifier, water: GroundwaterMap)?
 
@@ -427,8 +489,27 @@ final class GameState: ObservableObject {
     @Published var selectedMapCoordinate: MapCoordinate?
     @Published var currentTurn: Int = 1
 
-    /// Postavke kamere na mapi (zoom, nagib, brzina pomicanja) – mijenjaju se u Postavkama.
-    @Published var mapCameraSettings: MapCameraSettings = MapCameraSettings()
+    /// Postavke kamere na mapi. SceneKit pan/zoom koristi `setMapCameraSettingsSilent` (bez SwiftUI publish svaki frame).
+    private var _mapCameraSettings = MapCameraSettings()
+    private var mapCameraUIPublishWorkItem: DispatchWorkItem?
+    var mapCameraSettings: MapCameraSettings {
+        get { _mapCameraSettings }
+        set {
+            _mapCameraSettings = newValue
+            objectWillChange.send()
+        }
+    }
+
+    /// Pan/zoom/tilt iz SceneKita — bez objectWillChange (inače NSHostingView reentrancy).
+    func setMapCameraSettingsSilent(_ newValue: MapCameraSettings) {
+        _mapCameraSettings = newValue
+        mapCameraUIPublishWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.objectWillChange.send()
+        }
+        mapCameraUIPublishWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
+    }
 
     /// Odabrani objekt za postavljanje (npr. HugeWall.objectId); nil = ništa odabrano.
     @Published var selectedPlacementObjectId: String?
@@ -451,18 +532,24 @@ final class GameState: ObservableObject {
         editingTransportId = placement.objectId == Carriage.objectId ? placement.id : nil
         editingWarehouseRoute = nil
         if placement.objectId == Carriage.objectId { ensureTransportLine(for: placement) }
-        if StorageKind.of(buildingId: placement.objectId) != nil { ensureWarehouseLayout(for: placement) }
+        if StorageKind.of(buildingId: placement.objectId) != nil {
+            ensureWarehouseLayout(for: placement)
+            // Stara smočnica bez skladištara — zaposli kad je igrač otvori.
+            if !isMapEditorMode, placement.objectId != Lager.objectId, !warehouseHasKeeper(placement.id) {
+                hireWarehouseKeeper(storeId: placement.id)
+            }
+        }
     }
 
     /// Odabrani alat u panelu Alati: "sword", "mace", "report", "shovel", "pen". Nil = mač (zadano). Utječe na kursor i oznaku u panelu.
     @Published var selectedToolsPanelItem: String?
 
     /// Nadzemna mapa – grid u 1×1 jedinicama (100×100, 200×200 ili 1000×1000).
-    /// Nova nadzemna mapa dobiva novu, praznu podzemnu mapu istih dimenzija.
+    /// Nova nadzemna mapa dobiva podzemlje istih dimenzija, 100 % popunjeno (visina 10).
     @Published var gameMap: GameMap {
         didSet {
             guard gameMap !== oldValue else { return }
-            undergroundMap = GameMap(rows: gameMap.rows, cols: gameMap.cols, cells: [:], vertexHeights: [:])
+            undergroundMap = GameMap.makeFilledUnderground(rows: gameMap.rows, cols: gameMap.cols)
         }
     }
 
@@ -474,7 +561,11 @@ final class GameState: ObservableObject {
     @Published var mapSceneEpoch: Int = 0
 
     /// Povećava se pri svakom place/remove da SwiftUI sigurno ažurira prikaz mape.
-    @Published private(set) var placementsVersion: Int = 0
+    @Published private(set) var placementsVersion: Int = 0 {
+        didSet {
+            if isMapEditorMode { scheduleEditorMapAutoSave() }
+        }
+    }
 
     /// Stanje građevina u partiji (radnik, ciklus, vatra) po placement id.
     @Published var buildingStates: [String: BuildingState] = [:]
@@ -567,7 +658,10 @@ final class GameState: ObservableObject {
     }
     /// Glasnoća zvukova (0...1). Postavke → Audio.
     @Published var audioSoundsVolume: Double {
-        didSet { UserDefaults.standard.set(audioSoundsVolume, forKey: Self.audioSoundsVolumeKey) }
+        didSet {
+            UserDefaults.standard.set(audioSoundsVolume, forKey: Self.audioSoundsVolumeKey)
+            AudioManager.shared.updateFireLoopVolume(volume: effectiveSoundsVolume)
+        }
     }
     /// Glasnoća govora (0...1). Postavke → Audio.
     @Published var audioSpeechVolume: Double {
@@ -712,6 +806,9 @@ final class GameState: ObservableObject {
         didSet {
             UserDefaults.standard.set(audioMuted, forKey: Self.audioMutedKey)
             AudioManager.shared.updateMapMusicVolume(volume: effectiveMusicVolume)
+            AudioManager.shared.updateFireLoopVolume(volume: effectiveSoundsVolume)
+            if audioMuted { AudioManager.shared.stopFireLoop() }
+            else { syncFireAmbience() }
         }
     }
     @Published var invertScrollZoom: Bool {
@@ -970,6 +1067,7 @@ final class GameState: ObservableObject {
         people.stopTimer()
         oxen.stopTimer()
         AudioManager.shared.stopMapMusic()
+        AudioManager.shared.stopFireLoop()
     }
 
     func resumeGame() {
@@ -983,6 +1081,7 @@ final class GameState: ObservableObject {
             oxen.startTimer()
         }
         AudioManager.shared.playMapMusicIfAvailable(volume: effectiveMusicVolume)
+        syncFireAmbience()
     }
 
     func stepMatch() {
@@ -1249,6 +1348,7 @@ final class GameState: ObservableObject {
             cols: gameMap.cols,
             placements: gameMap.placements,
             undergroundPlacements: savedUndergroundPlacements,
+            undergroundVertexHeights: savedUndergroundVertexHeights,
             buildingStates: buildingStates,
             transportLines: transportLines,
             warehouseLayouts: warehouseLayouts,
@@ -1336,7 +1436,8 @@ final class GameState: ObservableObject {
                 vertexHeights: save.vertexHeights,
                 vertexOffsets: save.vertexOffsets,
                 lordStarts: save.lordStarts,
-                undergroundPlacements: save.undergroundPlacements
+                undergroundPlacements: save.undergroundPlacements,
+                undergroundVertexHeights: save.undergroundVertexHeights
             ))
             if let name = save.mapName, !name.isEmpty { mapEditorMapName = name }
             if let level = save.currentLevelName { currentLevelName = level }
@@ -1344,8 +1445,14 @@ final class GameState: ObservableObject {
             mapSceneEpoch += 1
         } else {
             gameMap.replacePlacements(save.placements)
-            ensureUndergroundMap()
-            undergroundMap.replacePlacements(save.undergroundPlacements ?? [])
+            applyUndergroundLayer(from: MapEditorSaveData(
+                mapName: save.mapName ?? mapEditorMapName,
+                rows: save.rows,
+                cols: save.cols,
+                placements: save.placements,
+                undergroundPlacements: save.undergroundPlacements,
+                undergroundVertexHeights: save.undergroundVertexHeights
+            ))
         }
         isSandboxPlay = save.isSandboxPlay ?? false
         buildingStates = save.buildingStates ?? [:]
@@ -1571,6 +1678,7 @@ final class GameState: ObservableObject {
         gameMap = map
         ensureUndergroundMap()
         undergroundMap.replacePlacements(undergroundPlacements)
+        syncUndergroundWaterOccupation()
         currentLevelName = nil
         soloMapLoadedFromFile = loadedFromFile
         if !loadedFromFile {
@@ -1610,7 +1718,7 @@ final class GameState: ObservableObject {
         supplyQueue = gold + rest
     }
 
-    /// Prednji u redu ide u inventar kad može. Ako ne može, cijeli red i dalje stoji.
+    /// Dostavi prvu stavku u redu koja ima mjesta (npr. jabuka u smočnicu iako daske ispred čekaju lager).
     private func tryDeliverFrontSupply() {
         guard isLevelReady, !isShowingMainMenu, !supplyQueue.isEmpty else {
             supplyClock?.invalidate()
@@ -1618,23 +1726,21 @@ final class GameState: ObservableObject {
             return
         }
         putGoldFirstInSupplyQueue()
-        var front = supplyQueue[0]
-        let fit: Int
-        if front.good == .gold {
-            fit = front.amount
-        } else if let faction = playerSeat?.id {
-            fit = unitsThatFit(front.good, adding: front.amount, faction: faction)
-        } else {
-            fit = 0
-        }
+        guard let faction = playerSeat?.id else { return }
+        guard let index = supplyQueue.firstIndex(where: { drop in
+            drop.good == .gold || unitsThatFit(drop.good, adding: 1, faction: faction) > 0
+        }) else { return }
+        var drop = supplyQueue[index]
+        let fit = drop.good == .gold
+            ? drop.amount
+            : unitsThatFit(drop.good, adding: drop.amount, faction: faction)
         guard fit > 0 else { return }
-        addGood(front.good, fit)
-        if fit >= front.amount {
-            supplyQueue.removeFirst()
+        addGood(drop.good, fit)
+        if fit >= drop.amount {
+            supplyQueue.remove(at: index)
         } else {
-            var waiting = supplyQueue[0]
-            waiting.amount = front.amount - fit
-            supplyQueue[0] = waiting
+            drop.amount -= fit
+            supplyQueue[index] = drop
         }
         if supplyQueue.isEmpty {
             supplyClock?.invalidate()
@@ -1669,6 +1775,7 @@ final class GameState: ObservableObject {
         case .bread: return "bread_resource"
         case .hay: return "hay_resource"
         case .apple: return "apple_resource"
+        case .honey: return "honey_resource"
         case .cheese: return "cheese_resource"
         case .meat: return "meat_resouce"
         case .sausages: return "sosages_resouce"
@@ -1754,7 +1861,10 @@ final class GameState: ObservableObject {
             originOffsetX: Double(gameMap.originOffsetX),
             originOffsetZ: Double(gameMap.originOffsetZ),
             vertexHeights: vertexHeightsDouble,
-            vertexOffsets: MapEditorSaveData.encodeOffsets(gameMap.vertexOffsets), lordStarts: MapEditorSaveData.encodeLordStarts(gameMap.lordStarts), undergroundPlacements: savedUndergroundPlacements
+            vertexOffsets: MapEditorSaveData.encodeOffsets(gameMap.vertexOffsets),
+            lordStarts: MapEditorSaveData.encodeLordStarts(gameMap.lordStarts),
+            undergroundPlacements: savedUndergroundPlacements,
+            undergroundVertexHeights: savedUndergroundVertexHeights
         )
         let (saved, saveError) = MapFileManager.save(data: data, to: url)
         guard saved else { return saveError ?? "Spremanje mape nije uspjelo." }
@@ -1819,7 +1929,7 @@ final class GameState: ObservableObject {
         newMap.originOffsetX = CGFloat(data.originOffsetX ?? 0)
         newMap.originOffsetZ = CGFloat(data.originOffsetZ ?? 0)
         gameMap = newMap
-        undergroundMap.replacePlacements(data.undergroundPlacements ?? [])
+        applyUndergroundLayer(from: data)
     }
 
     /// Promijeni veličinu mape (nova igra).
@@ -1872,12 +1982,28 @@ extension GameState {
             if objectId == Carriage.objectId { ensureTransportLine(for: placed) }
         }
         noteBuildingBorn(placed.id)
+        if objectId == Spring.objectId {
+            var state = buildingStates[placed.id] ?? BuildingState()
+            state.springFlow = UndergroundTerrain.defaultSpringFlow
+            buildingStates[placed.id] = state
+            syncUndergroundWaterOccupation(at: placed.coveredCoordinates())
+        }
         placementsVersion += 1
         objectWillChange.send()
         if playSound && playPlacementSound {
             AudioManager.shared.playSound(named: "place", volume: effectiveSoundsVolume)
         }
         placementDebugLog("SUCCESS object=\(objectId) row=\(row) col=\(col)")
+        if !isMapEditorMode, StorageKind.of(buildingId: objectId) != nil {
+            ensureWarehouseLayout(for: placed)
+            // Smočnica / oružarnica / štala: skladištar da se hrana odmah može slagati.
+            // Lager skladištara igrač zapošljava ručno (tlocrt polja).
+            if objectId != Lager.objectId {
+                hireWarehouseKeeper(storeId: placed.id)
+            }
+            tryDeliverFrontSupply()
+            presentNextSupplyIfNeeded()
+        }
         if !isMapEditorMode {
             let name = ObjectCatalog.shared.object(id: objectId)?.name ?? objectId
             MatchHistoryStore.shared.noteBuild(from: self, name: name, row: row, col: col)
@@ -1889,6 +2015,11 @@ extension GameState {
     /// Vlasnik ruši građevinu: radnik se oslobađa i vraća vatri, stanje građevine nestaje.
     func demolishPlacement(id: String) {
         guard let (layer, placement) = locatePlacement(id: id) else { return }
+        guard placement.objectId != Spring.objectId else {
+            placementError = "Izvor se ne može ukloniti; možeš samo namjestiti protok."
+            objectWillChange.send()
+            return
+        }
         releaseWorker(of: id)
         (layer == .surface ? gameMap : undergroundMap).removePlacement(id: id)
         buildingStates[id] = nil
@@ -1905,6 +2036,11 @@ extension GameState {
     /// Ukloni placement koji pokriva danu koordinatu (Map Editor – alat za brisanje).
     func removePlacement(at coordinate: MapCoordinate) {
         guard let p = activeMap.placement(at: coordinate) else { return }
+        guard p.objectId != Spring.objectId else {
+            placementError = "Izvor se ne može ukloniti; možeš samo namjestiti protok."
+            objectWillChange.send()
+            return
+        }
         activeMap.removePlacement(id: p.id)
         placementsVersion += 1
         objectWillChange.send()
@@ -2019,14 +2155,33 @@ extension GameState {
         levelLoadingMessage = "Učitavanje mape (\(gameMap.displayDimensionString))…"
     }
 
-    /// Zatvori Map Editor i vrati se na izbornik. Očisti editor-only stanje.
+    /// Zatvori Map Editor i vrati se na izbornik. Auto-spremi pa očisti editor-only stanje.
     func closeMapEditor() {
+        editorMapAutoSaveWorkItem?.cancel()
+        editorMapAutoSaveWorkItem = nil
+        if isMapEditorMode {
+            _ = saveEditorMap()
+        }
         mapEditorStateCancellable?.cancel()
         mapEditorStateCancellable = nil
         mapEditorState?.clear()
         mapEditorState = nil
         isMapEditorMode = false
         isShowingMainMenu = true
+    }
+
+    /// Tiho spremi mapu ~2 s nakon zadnje izmjene (Map Editor). Ne dira SwiftUI.
+    private func scheduleEditorMapAutoSave() {
+        guard isMapEditorMode else { return }
+        let name = mapEditorMapName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        editorMapAutoSaveWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.isMapEditorMode else { return }
+            _ = self.saveEditorMap()
+        }
+        editorMapAutoSaveWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: work)
     }
 
     /// Spremi trenutnu mapu u slot (Maps/200x200/, …) preko MapFileManager. Sprema samo unutar projekta. Vraća (uspjeh, poruka greške za prikaz).
@@ -2041,7 +2196,21 @@ extension GameState {
         }
         let fileName = MapStorage.fileName(forMapName: name, slotFallback: targetSlot)
         let vertexHeightsDouble = gameMap.vertexHeights.isEmpty ? nil : Dictionary(uniqueKeysWithValues: gameMap.vertexHeights.map { ($0.key, Double($0.value)) })
-        let data = MapEditorSaveData(mapName: name, rows: gameMap.rows, cols: gameMap.cols, placements: gameMap.placements, cells: gameMap.cells, createdDate: mapEditorCreatedDate ?? Date(), originOffsetX: Double(gameMap.originOffsetX), originOffsetZ: Double(gameMap.originOffsetZ), vertexHeights: vertexHeightsDouble, vertexOffsets: MapEditorSaveData.encodeOffsets(gameMap.vertexOffsets), lordStarts: MapEditorSaveData.encodeLordStarts(gameMap.lordStarts), undergroundPlacements: savedUndergroundPlacements)
+        let data = MapEditorSaveData(
+            mapName: name,
+            rows: gameMap.rows,
+            cols: gameMap.cols,
+            placements: gameMap.placements,
+            cells: gameMap.cells,
+            createdDate: mapEditorCreatedDate ?? Date(),
+            originOffsetX: Double(gameMap.originOffsetX),
+            originOffsetZ: Double(gameMap.originOffsetZ),
+            vertexHeights: vertexHeightsDouble,
+            vertexOffsets: MapEditorSaveData.encodeOffsets(gameMap.vertexOffsets),
+            lordStarts: MapEditorSaveData.encodeLordStarts(gameMap.lordStarts),
+            undergroundPlacements: savedUndergroundPlacements,
+            undergroundVertexHeights: savedUndergroundVertexHeights
+        )
         guard let fileURL = MapStorage.fileURL(rows: gameMap.rows, cols: gameMap.cols, fileName: fileName) else {
             let side = gameMap.rows * MapScale.smallCellsPerObjectCubeSide
             return (false, "Nije moguće odrediti putanju za spremanje. Veličina mape \(gameMap.displayDimensionString) možda nije dopuštena (200, 400, 600, 800, 1000). Putanja: \(MapStorage.mapsRootPath())")
@@ -2106,7 +2275,7 @@ extension GameState {
         newMap.originOffsetX = CGFloat(data.originOffsetX ?? 0)
         newMap.originOffsetZ = CGFloat(data.originOffsetZ ?? 0)
         gameMap = newMap
-        undergroundMap.replacePlacements(data.undergroundPlacements ?? [])
+        applyUndergroundLayer(from: data)
     }
 
     /// Učitaj prvu dostupnu mapu za dani slot (bilo koja veličina iz kataloga). Vraća true ako je uspjelo.
@@ -2143,7 +2312,21 @@ extension GameState {
         guard let newURL = MapStorage.fileURL(rows: data.rows, cols: data.cols, fileName: fileName) else {
             return (false, "Neispravna veličina mape.")
         }
-        let newData = MapEditorSaveData(mapName: name, rows: data.rows, cols: data.cols, placements: data.placements, cells: data.cells, createdDate: data.createdDate, originOffsetX: data.originOffsetX, originOffsetZ: data.originOffsetZ, vertexHeights: data.vertexHeights, vertexOffsets: data.vertexOffsets)
+        let newData = MapEditorSaveData(
+            mapName: name,
+            rows: data.rows,
+            cols: data.cols,
+            placements: data.placements,
+            cells: data.cells,
+            createdDate: data.createdDate,
+            originOffsetX: data.originOffsetX,
+            originOffsetZ: data.originOffsetZ,
+            vertexHeights: data.vertexHeights,
+            vertexOffsets: data.vertexOffsets,
+            lordStarts: data.lordStarts,
+            undergroundPlacements: data.undergroundPlacements,
+            undergroundVertexHeights: data.undergroundVertexHeights
+        )
         let (saved, saveError) = MapFileManager.save(data: newData, to: newURL)
         guard saved else { return (false, saveError ?? "Spremanje nije uspjelo.") }
         if let rel = MapStorage.relativePath(rows: data.rows, cols: data.cols, fileName: fileName) {
@@ -2157,9 +2340,13 @@ extension GameState {
         return (true, nil)
     }
 
-    /// Map Editor: obriši sve objekte s mape.
+    /// Map Editor: obriši sve objekte s mape (izvori ostaju – nepromjenjivi).
     func clearEditorMap() {
-        gameMap.replacePlacements([])
+        let springs = gameMap.placements.filter { $0.objectId == Spring.objectId }
+        gameMap.replacePlacements(springs)
+        undergroundMap.replacePlacements(undergroundMap.placements.filter { $0.objectId == Spring.objectId })
+        syncUndergroundWaterOccupation()
+        placementsVersion += 1
         objectWillChange.send()
     }
 }
@@ -2220,20 +2407,33 @@ enum MapEditorPaintMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-/// Podloga tla: zelena zemlja za farme, kamena ruda, željezna ruda.
+/// Podloga tla: zelena zemlja za farme, kamena ruda, željezna ruda; vode su u kategoriji Vode.
 enum PadBrush: String, CaseIterable, Identifiable {
     case trava = "Trava"
     case plodna = "Zelena zemlja"
     case kamen = "Kamena ruda"
     case zeljezo = "Željezna ruda"
-    case rijeka = "Rijeka"
+    case voda = "Voda"
     case more = "More"
     case pijesak = "Pijesak"
     case obicno = "Obično tlo"
     case mocvara = "Močvara"
+    case jezero = "Jezero"
     case obrisi = "Obriši"
 
     var id: String { rawValue }
+
+    /// Podloge u panelu Teren (bez voda).
+    static var landPads: [PadBrush] {
+        [.trava, .plodna, .kamen, .zeljezo, .pijesak, .obicno, .obrisi]
+    }
+
+    /// Podloge u panelu Vode.
+    static var waterPads: [PadBrush] {
+        [.voda, .more, .mocvara, .jezero]
+    }
+
+    var isWater: Bool { Self.waterPads.contains(self) }
 }
 
 /// Naslaga koju četkica postavlja (ili briše).
@@ -2296,7 +2496,7 @@ extension GameState {
         return result
     }
 
-    /// Visina se mijenja samo na gornjoj mapi; podzemlje je uvijek ravno, 10 m ispod.
+    /// Visina terena (četke) zasad se mijenja samo na nadzemlju; podzemlje počinje 100 % popunjeno (visina 10).
     private var canEditSurfaceTerrain: Bool { isMapEditorMode && !isUndergroundView }
 
     /// Podigni / spusti / izravnaj ćelije: mijenjaju se kutovi ploča (teren se crta iz njih) i visina ćelija.
@@ -2341,56 +2541,33 @@ extension GameState {
         applyElevation(to: Array(editorState.selectedCells), tool: tool, flattenTo: target)
     }
 
+    /// Primijeni elevaciju na zadani skup ćelija (npr. click-drag pravokutnik).
+    func applyTerrainElevation(to coords: [MapCoordinate], tool: TerrainToolOption) {
+        guard let first = coords.first else { return }
+        let target = gameMap.surface(row: first.row, col: first.col).center.height
+        applyElevation(to: coords, tool: tool, flattenTo: target)
+    }
+
     /// Oboji teren (pustinja, plodna, put, …) pod četkicom.
     func paintSurface(centerRow: Int, centerCol: Int, brushOption: TerrainBrushOption, surface: PovrsinaType) {
         guard canEditSurfaceTerrain else { return }
-        for coord in brushCoordinates(centerRow: centerRow, centerCol: centerCol, brushOption: brushOption) {
+        let coords = brushCoordinates(centerRow: centerRow, centerCol: centerCol, brushOption: brushOption)
+        for coord in coords {
             gameMap.setSurface(at: coord, surface)
         }
-        editorCellsVersion += 1
-        objectWillChange.send()
+        syncUndergroundWaterOccupation(at: coords)
+        bumpEditorCellsVersion()
     }
 
     /// Podloga: plodno tlo, kamena ruda ili željezna ruda.
     func paintPad(centerRow: Int, centerCol: Int, brushOption: TerrainBrushOption, pad: PadBrush) {
         guard canEditSurfaceTerrain else { return }
-        for coord in brushCoordinates(centerRow: centerRow, centerCol: centerCol, brushOption: brushOption) {
-            switch pad {
-            case .trava:
-                gameMap.setSurface(at: coord, .tlo)
-                gameMap.setDeposit(at: coord, nil)
-            case .plodna:
-                gameMap.setSurface(at: coord, .plodna)
-            case .kamen:
-                gameMap.setDeposit(at: coord, .stone)
-            case .zeljezo:
-                gameMap.setSurface(at: coord, .zeljezo)
-                gameMap.setDeposit(at: coord, .iron)
-            case .rijeka:
-                gameMap.setSurface(at: coord, .voda)
-                gameMap.setDeposit(at: coord, nil)
-            case .more:
-                gameMap.setSurface(at: coord, .more)
-                gameMap.setDeposit(at: coord, nil)
-            case .pijesak:
-                gameMap.setSurface(at: coord, .pustinja)
-                gameMap.setDeposit(at: coord, nil)
-            case .obicno:
-                gameMap.setSurface(at: coord, .tlo)
-                gameMap.setDeposit(at: coord, nil)
-            case .mocvara:
-                gameMap.setSurface(at: coord, .mocvara)
-                gameMap.setDeposit(at: coord, nil)
-            case .obrisi:
-                gameMap.setDeposit(at: coord, nil)
-                if let surface = gameMap.cell(row: coord.row, col: coord.col)?.povrsina,
-                   surface == .plodna || surface == .zeljezo || surface == .more || surface == .voda || surface == .pustinja || surface == .mocvara {
-                    gameMap.setSurface(at: coord, .tlo)
-                }
-            }
+        let coords = brushCoordinates(centerRow: centerRow, centerCol: centerCol, brushOption: brushOption)
+        for coord in coords {
+            paintPad(at: coord, pad: pad)
         }
-        editorCellsVersion += 1
-        objectWillChange.send()
+        syncUndergroundWaterOccupation(at: coords)
+        bumpEditorCellsVersion()
     }
 
     /// Postavi ili obriši naslagu (kamen, željezo) pod četkicom.
@@ -2399,8 +2576,7 @@ extension GameState {
         for coord in brushCoordinates(centerRow: centerRow, centerCol: centerCol, brushOption: brushOption) {
             gameMap.setDeposit(at: coord, deposit.resource)
         }
-        editorCellsVersion += 1
-        objectWillChange.send()
+        bumpEditorCellsVersion()
     }
 
     /// Dozvoli ili zabrani gradnju na ćelijama pod četkicom.
@@ -2409,8 +2585,7 @@ extension GameState {
         for coord in brushCoordinates(centerRow: centerRow, centerCol: centerCol, brushOption: brushOption) {
             gameMap.setBuildable(at: coord, buildable)
         }
-        editorCellsVersion += 1
-        objectWillChange.send()
+        bumpEditorCellsVersion()
     }
 
     /// Postavi indeks kretanja pod četkicom.
@@ -2419,8 +2594,7 @@ extension GameState {
         for coord in brushCoordinates(centerRow: centerRow, centerCol: centerCol, brushOption: brushOption) {
             gameMap.setMovementIndex(at: coord, index)
         }
-        editorCellsVersion += 1
-        objectWillChange.send()
+        bumpEditorCellsVersion()
     }
 
     /// Precizno: točka ploče (0–3 kutovi: gornji lijevi, gornji desni, donji desni, donji lijevi; 4 = sredina).
@@ -2493,6 +2667,142 @@ extension GameState {
         editorState.objectWillChange.send()
         objectWillChange.send()
     }
+
+    /// Pravokutnik ćelija između dva kuta (uključivo) – za click-drag u editoru.
+    func cellsInRectangle(row0: Int, col0: Int, row1: Int, col1: Int) -> [MapCoordinate] {
+        let rMin = min(row0, row1), rMax = max(row0, row1)
+        let cMin = min(col0, col1), cMax = max(col0, col1)
+        var out: [MapCoordinate] = []
+        out.reserveCapacity((rMax - rMin + 1) * (cMax - cMin + 1))
+        for r in rMin...rMax {
+            for c in cMin...cMax {
+                let coord = MapCoordinate(row: r, col: c)
+                if gameMap.isValid(coord) { out.append(coord) }
+            }
+        }
+        return out
+    }
+
+    /// Pregled označenog područja — samo lokalni Set, bez objectWillChange (overlay crta SceneKit).
+    func previewTerrainPaintRegion(row0: Int, col0: Int, row1: Int, col1: Int) {
+        guard let editorState = mapEditorState else { return }
+        editorState.selectedCells = Set(cellsInRectangle(row0: row0, col0: col0, row1: row1, col1: col1))
+        // Bez objectWillChange: publish usred drag/updateNSView → SwiftUI reentrancy / crni glitch.
+    }
+
+    func clearTerrainPaintPreview() {
+        mapEditorState?.clearCellSelection()
+        // Ne šalji objectWillChange ovdje — pozivatelj (paintPadRegion) već šalje jednom.
+    }
+
+    /// Spojene ćelije mora (4-susjedi) iz jedne početne ćelije.
+    func connectedSeaCells(from seed: MapCoordinate) -> Set<MapCoordinate> {
+        guard gameMap.isValid(seed), gameMap.cell(row: seed.row, col: seed.col)?.povrsina == .more else {
+            return []
+        }
+        var seen: Set<MapCoordinate> = []
+        var stack = [seed]
+        while let cur = stack.popLast() {
+            guard seen.insert(cur).inserted else { continue }
+            for (dr, dc) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                let n = MapCoordinate(row: cur.row + dr, col: cur.col + dc)
+                guard gameMap.isValid(n),
+                      gameMap.cell(row: n.row, col: n.col)?.povrsina == .more,
+                      !seen.contains(n) else { continue }
+                stack.append(n)
+            }
+        }
+        return seen
+    }
+
+    /// Klik na more → ulazak u editor te spojene površine.
+    @discardableResult
+    func enterSeaEditor(at row: Int, col: Int) -> Bool {
+        guard isMapEditorMode, let editor = mapEditorState else { return false }
+        let seed = MapCoordinate(row: row, col: col)
+        let cells = connectedSeaCells(from: seed)
+        guard !cells.isEmpty else { return false }
+        editor.editingSeaSeed = seed
+        editor.editingSeaCells = cells
+        editor.seaEditorTool = nil
+        editor.selectedCells = cells
+        objectWillChange.send()
+        return true
+    }
+
+    func exitSeaEditor() {
+        guard let editor = mapEditorState, editor.isSeaEditorActive else { return }
+        editor.exitSeaEditor()
+        editor.clearCellSelection()
+        objectWillChange.send()
+    }
+
+    func selectSeaEditorTool(_ tool: SeaEditorTool?) {
+        guard let editor = mapEditorState, editor.isSeaEditorActive else { return }
+        editor.seaEditorTool = tool
+        objectWillChange.send()
+    }
+
+    /// Primijeni podlogu / površinu na cijeli označeni pravokutnik (npr. more).
+    func paintPadRegion(row0: Int, col0: Int, row1: Int, col1: Int, pad: PadBrush) {
+        guard canEditSurfaceTerrain else { return }
+        let coords = cellsInRectangle(row0: row0, col0: col0, row1: row1, col1: col1)
+        guard !coords.isEmpty else { return }
+        for coord in coords {
+            paintPad(at: coord, pad: pad, publish: false)
+        }
+        syncUndergroundWaterOccupation(at: coords)
+        clearTerrainPaintPreview()
+        bumpEditorCellsVersion()
+    }
+
+    func paintSurfaceRegion(row0: Int, col0: Int, row1: Int, col1: Int, surface: PovrsinaType) {
+        guard canEditSurfaceTerrain else { return }
+        let coords = cellsInRectangle(row0: row0, col0: col0, row1: row1, col1: col1)
+        for coord in coords {
+            gameMap.setSurface(at: coord, surface, publish: false)
+        }
+        syncUndergroundWaterOccupation(at: coords)
+        clearTerrainPaintPreview()
+        bumpEditorCellsVersion()
+    }
+
+    /// Jedna ćelija – ista logika kao u paintPad petlji.
+    private func paintPad(at coord: MapCoordinate, pad: PadBrush, publish: Bool = true) {
+        switch pad {
+        case .trava:
+            gameMap.setSurface(at: coord, .tlo, publish: publish)
+            gameMap.setDeposit(at: coord, nil)
+        case .plodna:
+            gameMap.setSurface(at: coord, .plodna, publish: publish)
+        case .kamen:
+            gameMap.setDeposit(at: coord, .stone)
+        case .zeljezo:
+            gameMap.setSurface(at: coord, .zeljezo, publish: publish)
+            gameMap.setDeposit(at: coord, .iron)
+        case .voda, .jezero:
+            gameMap.setSurface(at: coord, .voda, publish: publish)
+            gameMap.setDeposit(at: coord, nil)
+        case .more:
+            gameMap.setSurface(at: coord, .more, publish: publish)
+            gameMap.setDeposit(at: coord, nil)
+        case .pijesak:
+            gameMap.setSurface(at: coord, .pustinja, publish: publish)
+            gameMap.setDeposit(at: coord, nil)
+        case .obicno:
+            gameMap.setSurface(at: coord, .tlo, publish: publish)
+            gameMap.setDeposit(at: coord, nil)
+        case .mocvara:
+            gameMap.setSurface(at: coord, .mocvara, publish: publish)
+            gameMap.setDeposit(at: coord, nil)
+        case .obrisi:
+            gameMap.setDeposit(at: coord, nil)
+            if let surface = gameMap.cell(row: coord.row, col: coord.col)?.povrsina,
+               surface == .plodna || surface == .zeljezo || surface == .voda || surface == .pustinja || surface == .mocvara || surface == .more {
+                gameMap.setSurface(at: coord, .tlo, publish: publish)
+            }
+        }
+    }
 }
 
 struct SavedMatchEntry: Identifiable, Equatable {
@@ -2510,6 +2820,7 @@ private struct SoloMatchSave: Codable {
     var cols: Int
     var placements: [Placement]
     var undergroundPlacements: [Placement]?
+    var undergroundVertexHeights: [String: Double]?
     var buildingStates: [String: BuildingState]?
     var transportLines: [String: TransportLine]?
     var warehouseLayouts: [String: WarehouseLayout]?
