@@ -68,3 +68,5 @@ Feudalism/Feudalism/Core/Objects/Industry/Iron/Iron_Obj.obj
 Feudalism/Feudalism/Core/Objects/Industry/Stone/Stone_Obj.obj
 Feudalism/Feudalism/Core/Objects/Weapons/Arrow/Meshy_AI_Arrow_0223151115_texture.obj
 Feudalism/Feudalism/Core/Objects/Weapons/Shield/Meshy_AI_Shild_0223150723_texture.obj
+
+*.profraw
