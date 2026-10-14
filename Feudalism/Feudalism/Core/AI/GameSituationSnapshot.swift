@@ -26,15 +26,17 @@ struct GameSituationSnapshot: Codable {
     var placements: [PlacementSnapshot]
     /// Ljudi na karti (seljaci, radnici, vojnici, specijalisti) – gdje su i čiji.
     var people: [PersonSnapshot]
-    /// Uživo iz igre: tekstualne mape (isti format kao snimanje partije / Python).
+    /// Tekstualne mape koje je AI zatražio (nil = taj sloj nije učitan u ovom pozivu).
     var liveMap: LiveMapSnapshot
+    /// Koje mape su ušle u ovaj snapshot.
+    var mapRequest: Int
     /// Id realm-a koji „gleda” situaciju (AI lord za kojeg donosimo odluku).
     var actingRealmId: String
     /// Opcionalno: kratki digest terena (npr. broj ćelija po tipu) – za manji input u model.
     var terrainSummary: TerrainSummary?
 
     private enum CodingKeys: String, CodingKey {
-        case turn, mapRows, mapCols, realms, placements, people, liveMap, actingRealmId, terrainSummary
+        case turn, mapRows, mapCols, realms, placements, people, liveMap, mapRequest, actingRealmId, terrainSummary
     }
 
     init(
@@ -45,6 +47,7 @@ struct GameSituationSnapshot: Codable {
         placements: [PlacementSnapshot],
         people: [PersonSnapshot],
         liveMap: LiveMapSnapshot,
+        mapRequest: AILordMapRequest,
         actingRealmId: String,
         terrainSummary: TerrainSummary?
     ) {
@@ -55,6 +58,7 @@ struct GameSituationSnapshot: Codable {
         self.placements = placements
         self.people = people
         self.liveMap = liveMap
+        self.mapRequest = mapRequest.rawValue
         self.actingRealmId = actingRealmId
         self.terrainSummary = terrainSummary
     }
@@ -68,24 +72,88 @@ struct GameSituationSnapshot: Codable {
         placements = try c.decode([PlacementSnapshot].self, forKey: .placements)
         people = try c.decodeIfPresent([PersonSnapshot].self, forKey: .people) ?? []
         liveMap = try c.decodeIfPresent(LiveMapSnapshot.self, forKey: .liveMap)
-            ?? LiveMapSnapshot(surface: "", underground: "", buildings: "", army: "", blockSize: 1)
+            ?? LiveMapSnapshot(surface: nil, underground: nil, buildings: nil, army: nil, blockSize: 1)
+        mapRequest = try c.decodeIfPresent(Int.self, forKey: .mapRequest) ?? AILordMapRequest.all.rawValue
         actingRealmId = try c.decode(String.self, forKey: .actingRealmId)
         terrainSummary = try c.decodeIfPresent(TerrainSummary.self, forKey: .terrainSummary)
     }
 }
 
-/// Četiri sloja mape kakve AI čita uživo – bez 3D grafike.
+/// Slojevi mape kakve AI čita — svaki je opcionalan (zaseban poziv).
 struct LiveMapSnapshot: Codable {
-    /// Površina: ćelija = površina,visina,prohodnost,gradnja (redovi razmaknuti \n).
-    var surface: String
-    /// Podzemlje, isti format.
-    var underground: String
-    /// Građevine (blokovi).
-    var buildings: String
-    /// Vojska na karti.
-    var army: String
+    /// Teren / resursi / prohodnost.
+    var surface: String?
+    /// Podzemlje — rijetko.
+    var underground: String?
+    /// Građevine.
+    var buildings: String?
+    /// Ljudi / vojnici.
+    var army: String?
     /// Koliko ćelija ulazi u jedan blok na buildings sloju.
     var blockSize: Int
+
+    init(
+        surface: String?,
+        underground: String?,
+        buildings: String?,
+        army: String?,
+        blockSize: Int
+    ) {
+        self.surface = surface
+        self.underground = underground
+        self.buildings = buildings
+        self.army = army
+        self.blockSize = blockSize
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        // Stari JSON (obavezni stringovi) i novi (opcionalni).
+        if let s = try? c.decode(String.self, forKey: .surface) {
+            surface = s
+        } else {
+            surface = try c.decodeIfPresent(String.self, forKey: .surface)
+        }
+        if let u = try? c.decode(String.self, forKey: .underground) {
+            underground = u
+        } else {
+            underground = try c.decodeIfPresent(String.self, forKey: .underground)
+        }
+        if let b = try? c.decode(String.self, forKey: .buildings) {
+            buildings = b
+        } else {
+            buildings = try c.decodeIfPresent(String.self, forKey: .buildings)
+        }
+        if let a = try? c.decode(String.self, forKey: .army) {
+            army = a
+        } else {
+            army = try c.decodeIfPresent(String.self, forKey: .army)
+        }
+        blockSize = try c.decodeIfPresent(Int.self, forKey: .blockSize) ?? 1
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case surface, underground, buildings, army, blockSize
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(surface, forKey: .surface)
+        try c.encodeIfPresent(underground, forKey: .underground)
+        try c.encodeIfPresent(buildings, forKey: .buildings)
+        try c.encodeIfPresent(army, forKey: .army)
+        try c.encode(blockSize, forKey: .blockSize)
+    }
+
+    static func from(vision: AILordVision) -> LiveMapSnapshot {
+        LiveMapSnapshot(
+            surface: vision.surface,
+            underground: vision.underground,
+            buildings: vision.buildings,
+            army: vision.army,
+            blockSize: vision.blockSize
+        )
+    }
 }
 
 struct RealmSnapshot: Codable {
@@ -163,8 +231,12 @@ struct TerrainSummary: Codable {
 // MARK: - Iz živog GameState / GameMap
 
 extension GameSituationSnapshot {
-    /// Napravi snapshot realne situacije iz trenutnog stanja igre – za AI reakciju i predikciju.
-    static func from(gameState: GameState, actingRealmId: String) -> GameSituationSnapshot {
+    /// Snapshot za AI. `maps` određuje koje tekstualne mape se zasebno učitaju (default: routine = surface+buildings+army).
+    static func from(
+        gameState: GameState,
+        actingRealmId: String,
+        maps: AILordMapRequest = .routine
+    ) -> GameSituationSnapshot {
         let realms = gameState.realmSeats.seats.map { seat in
             realmSnapshot(seat: seat, gameState: gameState)
         }
@@ -246,17 +318,7 @@ extension GameSituationSnapshot {
             terrainSummary = TerrainSummary(grass: g, water: w, forest: f, mountain: m)
         }
 
-        let maps = TextMapCapture.captureMaps(from: gameState)
-        let liveMap = LiveMapSnapshot(
-            surface: maps.main,
-            underground: maps.underground,
-            buildings: maps.buildings,
-            army: maps.army,
-            blockSize: TextMapCapture.blockSize(
-                rows: gameState.gameMap.rows,
-                cols: gameState.gameMap.cols
-            )
-        )
+        let vision = AILordVision.read(from: gameState, maps: maps)
 
         return GameSituationSnapshot(
             turn: gameState.currentTurn,
@@ -265,7 +327,8 @@ extension GameSituationSnapshot {
             realms: realms + extraRealms,
             placements: placements,
             people: people,
-            liveMap: liveMap,
+            liveMap: .from(vision: vision),
+            mapRequest: maps,
             actingRealmId: actingRealmId,
             terrainSummary: terrainSummary
         )

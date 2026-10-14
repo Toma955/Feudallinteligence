@@ -2,80 +2,66 @@
 //  LiveTextMapPanel.swift
 //  Feudalism
 //
-//  Tekstualne mape uživo (bez snimanja) + zadnjih 25 odluka. Svaki prozor se može pomaknuti i zatvoriti (X).
+//  Tekstualne mape uživo: svaki prozor se otvara zasebno (svoj poziv capture), pomiče i zatvara (X).
 //
 
 import SwiftUI
 
-private enum LiveMapWindowId: String, CaseIterable, Identifiable {
-    case main, underground, buildings, army, decisions
+enum LiveMapWindowId: String, CaseIterable, Identifiable {
+    case surface
+    case underground
+    case buildings
+    case army
+    case decisions
+
     var id: String { rawValue }
+
+    /// Četiri mape (bez odluka).
+    static let mapLayers: [LiveMapWindowId] = [.surface, .underground, .buildings, .army]
 
     func title(language: AppLanguage) -> String {
         let key: String
         switch self {
-        case .main: key = "history_map_main"
-        case .underground: key = "history_map_underground"
-        case .buildings: key = "history_map_buildings"
-        case .army: key = "history_map_army"
+        case .surface: key = "tools_map_surface"
+        case .underground: key = "tools_map_underground"
+        case .buildings: key = "tools_map_buildings"
+        case .army: key = "tools_map_army"
         case .decisions: key = "history_map_decisions"
         }
         return LocalizedStrings.string(for: key, language: language)
     }
 
+    var systemImage: String {
+        switch self {
+        case .surface: return "map"
+        case .underground: return "arrow.down.to.line"
+        case .buildings: return "building.2"
+        case .army: return "figure.stand"
+        case .decisions: return "list.bullet.rectangle"
+        }
+    }
+
     var defaultOffset: CGSize {
         switch self {
-        case .main: return CGSize(width: -280, height: -160)
+        case .surface: return CGSize(width: -280, height: -160)
         case .underground: return CGSize(width: 280, height: -160)
         case .buildings: return CGSize(width: -280, height: 160)
         case .army: return CGSize(width: 280, height: 160)
         case .decisions: return CGSize(width: 0, height: 320)
         }
     }
-}
 
-struct LiveTextMapPanel: View {
-    @EnvironmentObject private var gameState: GameState
-    @ObservedObject private var partyLog = LivePartyLog.shared
-    /// Kad se poveća, svi prozori se zatvore i otvore ispočetka.
-    var session: Int
-    var onCloseAll: () -> Void
-
-    @State private var openIds: Set<LiveMapWindowId> = Set(LiveMapWindowId.allCases)
-    @State private var offsets: [LiveMapWindowId: CGSize] = [:]
-    @State private var dragOrigins: [LiveMapWindowId: CGSize] = [:]
-
-    var body: some View {
-        // currentTurn + placementsVersion: mape se osvježavaju kako se partija mijenja.
-        let maps = TextMapCapture.captureMaps(from: gameState)
-        let _ = gameState.currentTurn
-        let _ = gameState.placementsVersion
-        ZStack {
-            ForEach(LiveMapWindowId.allCases) { id in
-                if openIds.contains(id) {
-                    floatingWindow(id: id, bodyText: text(for: id, maps: maps))
-                        .offset(offsets[id] ?? id.defaultOffset)
-                        .zIndex(zIndex(for: id))
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear { resetWindows() }
-        .onChange(of: session) { _ in resetWindows() }
-        .onChange(of: openIds) { ids in
-            if ids.isEmpty { onCloseAll() }
-        }
-    }
-
-    private func text(
-        for id: LiveMapWindowId,
-        maps: (main: String, underground: String, buildings: String, army: String)
-    ) -> String {
-        switch id {
-        case .main: return maps.main
-        case .underground: return maps.underground
-        case .buildings: return maps.buildings
-        case .army: return maps.army
+    /// Jedan zaseban TextMapCapture poziv (odluke = LivePartyLog).
+    func captureText(from gameState: GameState, partyLog: LivePartyLog) -> String {
+        switch self {
+        case .surface:
+            return TextMapCapture.captureSurface(from: gameState)
+        case .underground:
+            return TextMapCapture.captureUnderground(from: gameState)
+        case .buildings:
+            return TextMapCapture.captureBuildings(from: gameState)
+        case .army:
+            return TextMapCapture.captureArmy(from: gameState)
         case .decisions:
             if partyLog.decisions.isEmpty {
                 return LocalizedStrings.string(
@@ -94,11 +80,38 @@ struct LiveTextMapPanel: View {
             return "\(String(format: header, partyLog.decisions.count, cap))\n" + lines.joined(separator: "\n")
         }
     }
+}
+
+struct LiveTextMapPanel: View {
+    @EnvironmentObject private var gameState: GameState
+    @ObservedObject private var partyLog = LivePartyLog.shared
+
+    @State private var offsets: [LiveMapWindowId: CGSize] = [:]
+    @State private var dragOrigins: [LiveMapWindowId: CGSize] = [:]
+
+    private var openIds: [LiveMapWindowId] {
+        LiveMapWindowId.allCases.filter { gameState.openTextMapWindows.contains($0.rawValue) }
+    }
+
+    var body: some View {
+        let _ = gameState.currentTurn
+        let _ = gameState.placementsVersion
+        ZStack {
+            ForEach(openIds) { id in
+                floatingWindow(id: id, bodyText: id.captureText(from: gameState, partyLog: partyLog))
+                    .offset(offsets[id] ?? id.defaultOffset)
+                    .zIndex(zIndex(for: id))
+                    .id(id.rawValue)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .allowsHitTesting(!openIds.isEmpty)
+    }
 
     private func floatingWindow(id: LiveMapWindowId, bodyText: String) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: id == .decisions ? "list.bullet.rectangle" : "macwindow")
+                Image(systemName: id.systemImage)
                     .font(.system(size: 13, weight: .semibold))
                 Text(id.title(language: gameState.appLanguage))
                     .font(.system(size: 13, weight: .semibold))
@@ -110,7 +123,10 @@ struct LiveTextMapPanel: View {
                 }
                 Spacer(minLength: 8)
                 Button {
-                    openIds.remove(id)
+                    gameState.openTextMapWindows.remove(id.rawValue)
+                    if gameState.selectedToolsPanelItem == "map_\(id.rawValue)" {
+                        gameState.selectedToolsPanelItem = nil
+                    }
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 11, weight: .bold))
@@ -167,13 +183,7 @@ struct LiveTextMapPanel: View {
         case .army: return 4
         case .buildings: return 3
         case .underground: return 2
-        case .main: return 1
+        case .surface: return 1
         }
-    }
-
-    private func resetWindows() {
-        openIds = Set(LiveMapWindowId.allCases)
-        offsets = Dictionary(uniqueKeysWithValues: LiveMapWindowId.allCases.map { ($0, $0.defaultOffset) })
-        dragOrigins = [:]
     }
 }

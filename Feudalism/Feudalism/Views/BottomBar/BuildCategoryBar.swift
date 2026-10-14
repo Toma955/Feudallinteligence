@@ -163,23 +163,7 @@ struct BuildCategoryContent: View {
                 },
                 onSelectReport: { gameState.selectedToolsPanelItem = "report" },
                 onSelectShovel: { gameState.selectedToolsPanelItem = "shovel" },
-                onSelectPen: { gameState.selectedToolsPanelItem = "pen" },
-                onSelectWindow: {
-                    gameState.selectedPlacementObjectId = nil
-                    gameState.inspectedBuildingTitle = nil
-                    gameState.inspectedPlacementId = nil
-                    // Ponovni klik: zatvori sve pa otvori sve ispočetka.
-                    if gameState.selectedToolsPanelItem == "window" {
-                        gameState.selectedToolsPanelItem = nil
-                        gameState.textMapWindowSession += 1
-                        DispatchQueue.main.async {
-                            gameState.selectedToolsPanelItem = "window"
-                        }
-                    } else {
-                        gameState.textMapWindowSession += 1
-                        gameState.selectedToolsPanelItem = "window"
-                    }
-                }
+                onSelectPen: { gameState.selectedToolsPanelItem = "pen" }
             )
         case .house:
             HouseButtonExpandedView(

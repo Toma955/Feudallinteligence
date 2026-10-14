@@ -82,25 +82,70 @@ enum TextMapCapture {
         "zlato \(gold)  drvo \(wood)  kamen \(stone)  željezo \(iron)  hrana \(food)"
     }
 
-    static func captureMaps(from state: GameState) -> (main: String, underground: String, buildings: String, army: String) {
+    /// Sloj mape koji AI / UI može zatražiti zasebno (svaki ima svoj poziv).
+    enum MapLayerKind: String, CaseIterable, Codable {
+        /// Teren / resursi / prohodnost (glavna površina).
+        case surface
+        /// Podzemlje — AI rijetko gleda.
+        case underground
+        /// Građevine (i resursni objekti na karti).
+        case buildings
+        /// Ljudi i vojnici.
+        case army
+    }
+
+    /// Zaseban poziv jednog sloja — AI bira što treba (npr. army + buildings, bez underground).
+    static func capture(_ kind: MapLayerKind, from state: GameState) -> String {
+        switch kind {
+        case .surface: return captureSurface(from: state)
+        case .underground: return captureUnderground(from: state)
+        case .buildings: return captureBuildings(from: state)
+        case .army: return captureArmy(from: state)
+        }
+    }
+
+    /// Glavna mapa: teren, visina, prohodnost, može li se graditi (resursi u šiframa ćelije).
+    static func captureSurface(from state: GameState) -> String {
+        mainMatrix(state.gameMap)
+    }
+
+    /// Podzemlje — isti format kao površina; prazna matrica ako nema podzemlja.
+    static func captureUnderground(from state: GameState) -> String {
         let surface = state.gameMap
         let under = state.undergroundMap
-        let rows = surface.rows
-        let cols = surface.cols
-        let block = blockSize(rows: rows, cols: cols)
-        let vRows = max(1, (rows + block - 1) / block)
-        let vCols = max(1, (cols + block - 1) / block)
+        if under.rows == surface.rows, under.cols == surface.cols, under.rows > 0 {
+            return mainMatrix(under)
+        }
+        return zeroMatrix(rows: surface.rows, cols: surface.cols)
+    }
 
-        let main = mainMatrix(surface)
-        let underground = under.rows == surface.rows && under.cols == surface.cols && under.rows > 0
-            ? mainMatrix(under)
-            : zeroMatrix(rows: surface.rows, cols: surface.cols)
-        let army = armyMatrix(from: state, surface: surface)
+    /// Mapa građevina (blokovi).
+    static func captureBuildings(from state: GameState) -> String {
+        let surface = state.gameMap
+        let under = state.undergroundMap
+        let block = blockSize(rows: surface.rows, cols: surface.cols)
+        let vRows = max(1, (surface.rows + block - 1) / block)
+        let vCols = max(1, (surface.cols + block - 1) / block)
         var buildings = TextGrid(rows: vRows, cols: vCols)
         stampBuildings(surface.placements, block: block, grid: &buildings)
-        stampBuildings(under.placements, block: block, grid: &buildings)
+        if under.rows == surface.rows, under.cols == surface.cols {
+            stampBuildings(under.placements, block: block, grid: &buildings)
+        }
+        return buildings.encoded()
+    }
 
-        return (main, underground, buildings.encoded(), army)
+    /// Mapa ljudi / vojnika.
+    static func captureArmy(from state: GameState) -> String {
+        armyMatrix(from: state, surface: state.gameMap)
+    }
+
+    static func captureMaps(from state: GameState) -> (main: String, underground: String, buildings: String, army: String) {
+        (
+            captureSurface(from: state),
+            captureUnderground(from: state),
+            captureBuildings(from: state),
+            captureArmy(from: state)
+        )
     }
 
     /// Prazna matrica pune veličine. Svaka kućica je 0,0,0,0.

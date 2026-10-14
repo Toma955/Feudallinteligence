@@ -40,8 +40,17 @@ final class ComputerLordAI {
     }
 
     /// Heuristika dok nema naučene politike: bira tip poteza i točnu ćeliju.
+    /// Routine vision: zasebno čita surface + buildings + army (bez underground / odluka).
     func proposeMove(in gameState: GameState) -> (thought: String, move: AILordOrderedMove?) {
-        let situation = GameSituationSnapshot.from(gameState: gameState, actingRealmId: realmId)
+        let situation = GameSituationSnapshot.from(
+            gameState: gameState,
+            actingRealmId: realmId,
+            maps: .routine
+        )
+        // Mape su učitane zasebnim pozivima; heuristika još koristi placements, mape idu u snapshot za kasniji model.
+        _ = situation.liveMap.army
+        _ = situation.liveMap.buildings
+        _ = situation.liveMap.surface
         let own = situation.placements.filter { $0.realmId == realmId }
         let ids = own.map { $0.objectId.lowercased() }
         func has(_ piece: String) -> Bool { ids.contains { $0.contains(piece) } }

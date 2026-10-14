@@ -578,14 +578,10 @@ struct ContentView: View {
                     if gameState.showFPS {
                         performancePanelOverlay
                     }
-                    if gameState.selectedToolsPanelItem == "window" {
-                        LiveTextMapPanel(
-                            session: gameState.textMapWindowSession,
-                            onCloseAll: { gameState.selectedToolsPanelItem = nil }
-                        )
-                        .environmentObject(gameState)
-                        .allowsHitTesting(true)
-                        .transition(.opacity)
+                    if !gameState.openTextMapWindows.isEmpty {
+                        LiveTextMapPanel()
+                            .environmentObject(gameState)
+                            .transition(.opacity)
                     }
                 }
             }

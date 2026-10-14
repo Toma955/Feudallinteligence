@@ -569,10 +569,23 @@ final class GameState: ObservableObject {
         }
     }
 
-    /// Odabrani alat u panelu Alati: "sword", "mace", "report", "shovel", "pen", "window". Nil = mač (zadano). Utječe na kursor i oznaku u panelu.
+    /// Odabrani alat u panelu Alati: "sword", "mace", "report", "shovel", "pen", "map_*". Nil = mač (zadano).
     @Published var selectedToolsPanelItem: String?
-    /// Brojač za Prozor alat: rast zatvara/otvara tekstualne mape ispočetka.
-    @Published var textMapWindowSession: Int = 0
+    /// Otvoreni tekstualni prozori mapa — svaki zasebno: surface / underground / buildings / army / decisions.
+    @Published var openTextMapWindows: Set<String> = []
+
+    /// Uključi/isključi jedan map prozor (ne otvara sve odjednom).
+    func toggleTextMapWindow(_ id: String) {
+        if openTextMapWindows.contains(id) {
+            openTextMapWindows.remove(id)
+            if selectedToolsPanelItem == "map_\(id)" {
+                selectedToolsPanelItem = nil
+            }
+        } else {
+            openTextMapWindows.insert(id)
+            selectedToolsPanelItem = "map_\(id)"
+        }
+    }
 
     /// Nadzemna mapa – grid u 1×1 jedinicama (100×100, 200×200 ili 1000×1000).
     /// Nova nadzemna mapa dobiva podzemlje istih dimenzija, 100 % popunjeno (visina 10).
