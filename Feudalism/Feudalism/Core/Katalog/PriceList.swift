@@ -53,6 +53,7 @@ enum PriceList {
         case Stable.objectId: return Price(wood: 0, gold: 0)
         case Miners.objectId: return Price(wood: 0, gold: 0)
         case Engineering.objectId: return Price(wood: 0, iron: 0, gold: 0)
+        case Academy.objectId: return Price(stone: 0, wood: 0, gold: 0)
         case TowerRoundTall.objectId, TowerSquareSmall.objectId, TowerSquareMedium.objectId,
              TowerSquareLarge.objectId, TowerRoundLarge.objectId:
             return Price(stone: 0, wood: 0)

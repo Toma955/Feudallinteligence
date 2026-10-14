@@ -154,6 +154,179 @@ final class AILordProfileStore: ObservableObject {
         return notes
     }
 
+    /// Trening s partija: traits + politika. Dobre odluke se imitiraju, loše se kažnjavaju.
+    @discardableResult
+    func trainFromMatches(
+        profileIds: [String],
+        matchIds: [String],
+        judgments: [JudgedDecision] = [],
+        epochs: Int = 12,
+        onStep: ((Int, Double) -> Void)? = nil
+    ) -> [AITrainingNote] {
+        let vocabulary = notebook.vocabulary
+        let records = matchIds.compactMap { MatchHistoryStore.shared.record(id: $0) }
+        let lessons = AIMatchReview.lessons(in: records)
+        let judged = judgments.isEmpty ? AIMatchDecisionAnalysis.judge(records: records) : judgments
+
+        struct SignedSample {
+            var sample: AIPolicySample
+            var quality: DecisionQuality
+        }
+        var signed: [SignedSample] = []
+        let byDecisionId = Dictionary(uniqueKeysWithValues: judged.map { ($0.id, $0) })
+        for record in records {
+            let base = AIMatchPolicyTraining.samples(from: record, vocabulary: vocabulary)
+            for sample in base {
+                // Nađi quality po actionId+second ili default good za imitaciju bez ocjene.
+                let hit = judged.first {
+                    $0.matchId == record.id
+                        && ($0.actionId == sample.actionId || $0.decision.second == sample.second)
+                }
+                let q = hit?.quality
+                    ?? record.decisions?.first(where: { AIMatchPolicyTraining.resolvedActionId($0) == sample.actionId })?.quality
+                    ?? .good
+                signed.append(SignedSample(sample: sample, quality: q))
+                _ = byDecisionId
+            }
+        }
+
+        var notes = train(profileIds: profileIds, lessons: lessons, matchIds: matchIds)
+
+        guard !signed.isEmpty else {
+            onStep?(max(1, epochs), 0.25)
+            return notes
+        }
+
+        let steps = max(1, epochs)
+        for step in 1...steps {
+            var lossSum: Float = 0
+            var n = 0
+            for id in profileIds {
+                guard let levelId = profile(id: id)?.levelId, var w = weights[levelId] else { continue }
+                for item in signed {
+                    switch item.quality {
+                    case .good:
+                        lossSum += w.imitate(
+                            stateFeatures: item.sample.state,
+                            actionIndex: item.sample.actionIndex,
+                            learningRate: 0.05
+                        )
+                    case .bad:
+                        lossSum += w.reject(
+                            stateFeatures: item.sample.state,
+                            actionIndex: item.sample.actionIndex
+                        )
+                    case .neutral:
+                        lossSum += w.imitate(
+                            stateFeatures: item.sample.state,
+                            actionIndex: item.sample.actionIndex,
+                            learningRate: 0.015
+                        )
+                    }
+                    n += 1
+                }
+                weights[levelId] = w
+                if step == steps {
+                    AILordWeightsStore.save(w)
+                }
+            }
+            let avg = n > 0 ? Double(lossSum / Float(n)) : 0
+            onStep?(step, min(5, avg) / 5)
+        }
+
+        let goodN = judged.filter { $0.quality == .good }.count
+        let badN = judged.filter { $0.quality == .bad }.count
+        notes.append(AITrainingNote(
+            lordId: profileIds.first ?? "",
+            lordName: "politika",
+            lesson: AIMatchLesson(
+                id: "policy-signed",
+                title: "Politika s ocjenama",
+                detail: "Uzoraka \(signed.count): \(goodN) dobrih, \(badN) loših (ostatak neutralno).",
+                trait: "patience",
+                delta: 0
+            ),
+            applied: Float(signed.count)
+        ))
+        save()
+        return notes
+    }
+
+    /// Predviđanje: treniraj „što slijedi“ uz ograničen vid (sekunde snimke).
+    @discardableResult
+    func trainPrediction(
+        profileIds: [String],
+        matchIds: [String],
+        sightSeconds: Int,
+        epochs: Int = 12,
+        onStep: ((Int, Double, AIPredictionReport) -> Void)? = nil
+    ) -> AIPredictionReport {
+        let vocabulary = notebook.vocabulary
+        let records = matchIds.compactMap { MatchHistoryStore.shared.record(id: $0) }
+        var lastReport = AIPredictionReport(
+            trials: [], actionHits: 0, actionTotal: 0, meanValueError: nil, sightSeconds: sightSeconds
+        )
+        guard !records.isEmpty, !profileIds.isEmpty else {
+            onStep?(max(1, epochs), 1, lastReport)
+            return lastReport
+        }
+
+        let steps = max(1, epochs)
+        for step in 1...steps {
+            var lossSum: Float = 0
+            var n = 0
+            for id in profileIds {
+                guard let levelId = profile(id: id)?.levelId, var w = weights[levelId] else { continue }
+                let loss = AIMatchPrediction.trainStep(
+                    weights: &w,
+                    records: records,
+                    vocabulary: vocabulary,
+                    sightSeconds: sightSeconds
+                )
+                weights[levelId] = w
+                lossSum += loss
+                n += 1
+                if step == steps {
+                    AILordWeightsStore.save(w)
+                    if var profile = profile(id: id) {
+                        profile.modelVersion += 1
+                        updateProfile(profile)
+                    }
+                }
+                if let w = weights[levelId] {
+                    lastReport = AIMatchPrediction.evaluate(
+                        weights: w,
+                        records: records,
+                        vocabulary: vocabulary,
+                        sightSeconds: sightSeconds
+                    )
+                }
+            }
+            let avg = n > 0 ? Double(lossSum / Float(n)) : 0
+            onStep?(step, min(5, avg) / 5, lastReport)
+        }
+        save()
+        return lastReport
+    }
+
+    /// Samo ocjena predviđanja (bez upisa težina), uz ograničen vid.
+    func evaluatePrediction(profileId: String, matchIds: [String], sightSeconds: Int) -> AIPredictionReport {
+        let vocabulary = notebook.vocabulary
+        let records = matchIds.compactMap { MatchHistoryStore.shared.record(id: $0) }
+        guard let levelId = profile(id: profileId)?.levelId,
+              let w = weights[levelId] else {
+            return AIPredictionReport(
+                trials: [], actionHits: 0, actionTotal: 0, meanValueError: nil, sightSeconds: sightSeconds
+            )
+        }
+        return AIMatchPrediction.evaluate(
+            weights: w,
+            records: records,
+            vocabulary: vocabulary,
+            sightSeconds: sightSeconds
+        )
+    }
+
     /// Jedan korak treninga. Zadnji korak upiše inačicu, level i bilježnicu.
     func absorb(profileIds: [String], lessons: [AIMatchLesson], fraction: Float, commit: Bool) {
         if commit {

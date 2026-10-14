@@ -2,23 +2,17 @@
 //  ComputerLordAI.swift
 //  Feudalism
 //
-//  Igra je isključivo za treniranje i ograđivanje AI modela. Modeli imaju osnovne postavke
-//  (profil: stil borbe, taktika, strategija) i prema njima se ponašaju. Koriste REALNU
-//  situaciju u igri – reagiraju na nju, predviđaju budućnost. Treniranje: Python (isti
-//  format situacije, npr. JSON). Inferenca u igri: Swift + Core ML (Neural Engine / GPU / CPU).
+//  Inferenca: težine politike + heuristika. Snapshot učitava mape zasebnim pozivima.
 //
 
 import Foundation
 
-/// Označava da će computer lord koristiti Apple ML stack (Neural Engine, CPU, GPU).
 enum ComputerLordComputeTarget {
     case neuralEngineAndCPU
     case gpuAndCPU
     case all
 }
 
-/// Kontroler AI za computer lord. Koristi realnu situaciju u igri (GameSituationSnapshot),
-/// osnovne postavke profila i prema njima reagira i predvida; Python koristi isti snapshot za treniranje.
 final class ComputerLordAI {
     let realmId: String
     var computeTarget: ComputerLordComputeTarget = .all
@@ -34,27 +28,13 @@ final class ComputerLordAI {
         return AILordProfileStore.shared.profile(id: id)
     }
 
-    /// Realna situacija u igri → predloženi potez (s koordinatama kad treba).
     func decideNextAction(gameState: GameState) async {
         _ = proposeMove(in: gameState)
     }
 
-    /// Heuristika dok nema naučene politike: bira tip poteza i točnu ćeliju.
-    /// Routine vision: zasebno čita surface + buildings + army (bez underground / odluka).
+    /// Predloži potez: politika (ako ima težine) bira akciju; inače heuristika.
     func proposeMove(in gameState: GameState) -> (thought: String, move: AILordOrderedMove?) {
-        let situation = GameSituationSnapshot.from(
-            gameState: gameState,
-            actingRealmId: realmId,
-            maps: .routine
-        )
-        // Mape su učitane zasebnim pozivima; heuristika još koristi placements, mape idu u snapshot za kasniji model.
-        _ = situation.liveMap.army
-        _ = situation.liveMap.buildings
-        _ = situation.liveMap.surface
-        let own = situation.placements.filter { $0.realmId == realmId }
-        let ids = own.map { $0.objectId.lowercased() }
-        func has(_ piece: String) -> Bool { ids.contains { $0.contains(piece) } }
-        let style = profile?.fightingStyle ?? .balanced
+        _ = GameSituationSnapshot.from(gameState: gameState, actingRealmId: realmId, maps: .routine)
 
         guard let seat = gameState.realmSeats.seats.first(where: {
             $0.id == realmId || $0.realmIds.contains(realmId)
@@ -63,54 +43,103 @@ final class ComputerLordAI {
         }
         let nearRow = Int(seat.castleRow.rounded())
         let nearCol = Int(seat.castleCol.rounded())
+        let own = gameState.mapLogic.allPlacements
+            .map(\.placement)
+            .filter { gameState.owner(of: $0) == seat.id }
+        let ids = own.map { $0.objectId.lowercased() }
+        func has(_ piece: String) -> Bool { ids.contains { $0.contains(piece) } }
 
-        func buildSpot(_ objectId: String, thought: String) -> (String, AILordOrderedMove?) {
-            if let spot = gameState.findAIBuildSpot(
-                objectId: objectId,
-                nearRow: nearRow,
-                nearCol: nearCol
+        let stateFeatures = AILordStateEncoder.encode(from: gameState)
+        let store = AILordProfileStore.shared
+        let vocabulary = store.notebook.vocabulary
+
+        if let profile, let weights = store.weights(for: profile) {
+            let logits = weights.forward(stateFeatures: stateFeatures).logits
+            if let pick = rankedBuildOrWait(
+                logits: logits,
+                vocabulary: vocabulary,
+                has: has,
+                style: profile.fightingStyle
             ) {
+                if pick.actionId == "action:wait" {
+                    return ("politika: čeka (naučeno).", .wait())
+                }
+                if pick.actionId.hasPrefix("action:build:") {
+                    let objectId = String(pick.actionId.dropFirst("action:build:".count))
+                    if let spot = gameState.findAIBuildSpot(objectId: objectId, nearRow: nearRow, nearCol: nearCol) {
+                        let name = ObjectCatalog.shared.object(id: objectId)?.name ?? objectId
+                        return ("politika: gradi \(name).", .build(objectId, row: spot.row, col: spot.col))
+                    }
+                }
+            }
+        }
+
+        return heuristicMove(has: has, nearRow: nearRow, nearCol: nearCol, gameState: gameState)
+    }
+
+    private func rankedBuildOrWait(
+        logits: [Float],
+        vocabulary: AILordVocabulary,
+        has: (String) -> Bool,
+        style: AIFightingStyle
+    ) -> (actionId: String, score: Float)? {
+        var candidates: [(String, Float)] = []
+        for (index, actionId) in vocabulary.actions.enumerated() {
+            guard index < logits.count else { continue }
+            if actionId == "action:wait" {
+                candidates.append((actionId, logits[index]))
+                continue
+            }
+            guard actionId.hasPrefix("action:build:") else { continue }
+            let objectId = String(actionId.dropFirst("action:build:".count)).lowercased()
+            if objectId.contains("house"), has("house") { continue }
+            if (objectId.contains("farm") || objectId.contains("apple") || objectId.contains("corn")),
+               has("farm") || has("corn") || has("apple") { continue }
+            if objectId.contains("smocnica") || objectId.contains("food"), has("smocnica") || has("food") { continue }
+            if objectId.contains("lager"), has("lager") { continue }
+            if objectId.contains("training"), has("training") { continue }
+            if objectId.contains("market"), style != .economic, style != .balanced { continue }
+            candidates.append((actionId, logits[index]))
+        }
+        return candidates.max(by: { $0.1 < $1.1 }).map { ($0.0, $0.1) }
+    }
+
+    private func heuristicMove(
+        has: (String) -> Bool,
+        nearRow: Int,
+        nearCol: Int,
+        gameState: GameState
+    ) -> (thought: String, move: AILordOrderedMove?) {
+        let style = profile?.fightingStyle ?? .balanced
+        func buildSpot(_ objectId: String, thought: String) -> (String, AILordOrderedMove?) {
+            if let spot = gameState.findAIBuildSpot(objectId: objectId, nearRow: nearRow, nearCol: nearCol) {
                 return (thought, .build(objectId, row: spot.row, col: spot.col))
             }
             return (thought + " Nema slobodnog mjesta.", nil)
         }
-
         if !has("house") {
-            return buildSpot(House.objectId, thought: "razmišlja: ljudi nemaju krov, pa gradi kuću.")
+            return buildSpot(House.objectId, thought: "heuristika: gradi kuću.")
         }
         if !has("farm") && !has("corn") && !has("apple") && (style == .economic || style == .balanced) {
-            return buildSpot(Farm.objectId, thought: "razmišlja: hrana je tanka, pa gradi farmu.")
+            return buildSpot(Farm.objectId, thought: "heuristika: gradi farmu.")
         }
         if !has("smocnica") && !has("food") {
-            return buildSpot(Smocnica.objectId, thought: "razmišlja: zaliha nema kamo, pa gradi smočnicu.")
+            return buildSpot(Smocnica.objectId, thought: "heuristika: gradi smočnicu.")
         }
         if !has("training") && (style == .aggressive || style == .raider) {
-            return buildSpot(Training.objectId, thought: "razmišlja: vojska je prazna, pa gradi trening.")
+            return buildSpot(Training.objectId, thought: "heuristika: gradi trening.")
         }
         if !has("lager") {
-            return buildSpot(Lager.objectId, thought: "razmišlja: sirovine stoje vani, pa gradi skladište.")
+            return buildSpot(Lager.objectId, thought: "heuristika: gradi skladište.")
         }
         if !has("market") && style == .economic {
-            return buildSpot(Market.objectId, thought: "razmišlja: treba tržnica za kupnju i prodaju.")
+            return buildSpot(Market.objectId, thought: "heuristika: gradi tržnicu.")
         }
-        return ("razmišlja: dvorac drži ritam i za sada ne gradi.", .wait())
-    }
-
-    /// Stari API: misao + tip građevine (bez koordinate).
-    func think(in gameState: GameState) -> (thought: String, objectId: String?) {
-        let proposal = proposeMove(in: gameState)
-        let objectId: String?
-        if let move = proposal.move, move.actionId.hasPrefix("action:build:") {
-            objectId = String(move.actionId.dropFirst("action:build:".count))
-        } else {
-            objectId = nil
-        }
-        return (proposal.thought, objectId)
+        return ("heuristika: čeka.", .wait())
     }
 }
 
 extension GameState {
-    /// Dva ili više AI lordova: svakih 12 s jedan odigra potez (s točnom ćelijom).
     func tickAILords() {
         guard aiEnabled, recordThisMatch else { return }
         let lords = computerLords.filter { !$0.isDefeated }
@@ -124,18 +153,27 @@ extension GameState {
             row = Int(seat.castleRow.rounded())
             col = Int(seat.castleCol.rounded())
         }
+        var actionId: String?
         if let move = decision.move {
+            actionId = move.actionId
             let result = executeAIMove(move, forRealmId: lord.id)
             text += " \(result.message)"
             if let r = result.row { row = r }
             if let c = result.col { col = c }
         } else {
             text += " Napravio: čeka."
+            actionId = "action:wait"
         }
-        MatchHistoryStore.shared.noteThought(from: self, lord: lord.name, text: text, row: row, col: col)
+        MatchHistoryStore.shared.noteThought(
+            from: self,
+            lord: lord.name,
+            text: text,
+            row: row,
+            col: col,
+            actionId: actionId
+        )
     }
 
-    /// Pronađi prvo slobodno mjesto oko točke (za predlaganje poteza).
     func findAIBuildSpot(objectId: String, nearRow: Int, nearCol: Int) -> (row: Int, col: Int)? {
         let obj = ObjectCatalog.shared.object(id: objectId)
         let width = max(1, obj?.size.width ?? 1)
@@ -154,5 +192,4 @@ extension GameState {
         }
         return nil
     }
-
 }

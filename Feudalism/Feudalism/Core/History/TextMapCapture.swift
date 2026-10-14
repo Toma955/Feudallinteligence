@@ -369,7 +369,8 @@ enum TextMapCapture {
         }
         if id.contains("iron") || id.contains("stone") || id.contains("miner") { return "N" }
         if id.contains("house") || id.contains("hotel") || id.contains("church") || id.contains("pharmacy")
-            || id.contains("greenhouse") || id.contains("well") || id.contains("spring") {
+            || id.contains("greenhouse") || id.contains("well") || id.contains("spring")
+            || id.contains("academy") || id.contains("diplomacy") {
             return "H"
         }
         if id.contains("food") || id.contains("bakery") || id.contains("brewery") || id.contains("windmill")

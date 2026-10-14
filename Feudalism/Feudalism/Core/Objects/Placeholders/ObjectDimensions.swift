@@ -115,6 +115,8 @@ enum ObjectDimensions {
     static let church = ObjectDimension(cellWidth: 4, cellHeight: 4, heightCells: 6)
     /// Diplomacija: 5×5×6.
     static let diplomacy = ObjectDimension(cellWidth: 5, cellHeight: 5, heightCells: 6)
+    /// Akademija: 5×5×5.
+    static let academy = ObjectDimension(cellWidth: 5, cellHeight: 5, heightCells: 5)
 
     // MARK: - Oružje
     /// Mač, štit, luk, koplje i koža: 4×4 metra. Trening i oružarnica ostaju 5×5.

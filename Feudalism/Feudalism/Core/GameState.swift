@@ -827,6 +827,15 @@ final class GameState: ObservableObject {
     @Published var showTutorialHints: Bool {
         didSet { UserDefaults.standard.set(showTutorialHints, forKey: Self.showTutorialHintsKey) }
     }
+    /// Personalizacija: kratice — hover natpis ispod islanda / info nakon 10 s.
+    @Published var showContextualShortcuts: Bool {
+        didSet {
+            UserDefaults.standard.set(showContextualShortcuts, forKey: Self.showContextualShortcutsKey)
+            if !showContextualShortcuts {
+                Task { @MainActor in ContextualHelpController.shared.clear() }
+            }
+        }
+    }
     @Published var cameraSensitivity: Double {
         didSet { UserDefaults.standard.set(cameraSensitivity, forKey: Self.cameraSensitivityKey) }
     }
@@ -948,6 +957,7 @@ final class GameState: ObservableObject {
         autoSaveEnabled = true
         autoSaveIntervalMinutes = 10
         showTutorialHints = true
+        showContextualShortcuts = true
         fastGame = false
         showLogPanel = false
         reduceMotion = false
@@ -1001,6 +1011,7 @@ final class GameState: ObservableObject {
         if interval <= 0 { interval = 10 }
         self.autoSaveIntervalMinutes = interval
         self.showTutorialHints = UserDefaults.standard.object(forKey: Self.showTutorialHintsKey) as? Bool ?? true
+        self.showContextualShortcuts = UserDefaults.standard.object(forKey: Self.showContextualShortcutsKey) as? Bool ?? true
         var sensitivity = UserDefaults.standard.object(forKey: Self.cameraSensitivityKey) as? Double ?? 1.0
         if sensitivity <= 0 { sensitivity = 1.0 }
         self.cameraSensitivity = sensitivity
@@ -1746,11 +1757,9 @@ final class GameState: ObservableObject {
         hop = 0
     }
 
-    /// Naručene zalihe stižu jedna po jedna. Zlato je uvijek prvo.
-    /// Ostalo stoji u redu dok skladište nema mjesta.
+    /// Naručene zalihe: što može u skladište ide odmah; što nema mjesta ide na kraj i ne koči ostalo.
     func enqueueOpeningSupplies(_ items: [SupplyDrop]) {
         supplyQueue.append(contentsOf: items.filter { $0.amount > 0 })
-        putGoldFirstInSupplyQueue()
         presentNextSupplyIfNeeded()
     }
 
@@ -1760,6 +1769,9 @@ final class GameState: ObservableObject {
             supplyClock = nil
             return
         }
+        // Odmah propušti sve što trenutno može (zlato, lager, …) — bez čekanja zbog jabuke bez smočnice.
+        tryDeliverFrontSupply()
+        guard !supplyQueue.isEmpty else { return }
         guard supplyClock == nil else { return }
         let timer = Timer(timeInterval: 1.15, repeats: true) { [weak self] _ in
             self?.tryDeliverFrontSupply()
@@ -1768,36 +1780,53 @@ final class GameState: ObservableObject {
         supplyClock = timer
     }
 
-    private func putGoldFirstInSupplyQueue() {
-        let gold = supplyQueue.filter { $0.good == .gold }
-        let rest = supplyQueue.filter { $0.good != .gold }
-        supplyQueue = gold + rest
+    /// Može li se barem jedna jedinica odmah prebaciti.
+    private func canDeliverSupply(_ drop: SupplyDrop, faction: String) -> Bool {
+        if drop.good == .gold { return drop.amount > 0 }
+        return unitsThatFit(drop.good, adding: 1, faction: faction) > 0
     }
 
-    /// Dostavi prvu stavku u redu koja ima mjesta (npr. jabuka u smočnicu iako daske ispred čekaju lager).
+    /// Dostavljivo naprijed (zlato prvo), blokirano na kraj — jabuka bez smočnice ne koči novce/drvo.
+    private func prioritizeDeliverableSupplies(faction: String) {
+        let deliverable = supplyQueue.filter { canDeliverSupply($0, faction: faction) }
+        let blocked = supplyQueue.filter { !canDeliverSupply($0, faction: faction) }
+        let gold = deliverable.filter { $0.good == .gold }
+        let rest = deliverable.filter { $0.good != .gold }
+        supplyQueue = gold + rest + blocked
+    }
+
+    /// Dostavi sve što trenutno ima mjesta. Blokirano ostaje na kraju reda dok se ne sagradi skladište.
     private func tryDeliverFrontSupply() {
         guard isLevelReady, !isShowingMainMenu, !supplyQueue.isEmpty else {
             supplyClock?.invalidate()
             supplyClock = nil
             return
         }
-        putGoldFirstInSupplyQueue()
         guard let faction = playerSeat?.id else { return }
-        guard let index = supplyQueue.firstIndex(where: { drop in
-            drop.good == .gold || unitsThatFit(drop.good, adding: 1, faction: faction) > 0
-        }) else { return }
-        var drop = supplyQueue[index]
-        let fit = drop.good == .gold
-            ? drop.amount
-            : unitsThatFit(drop.good, adding: drop.amount, faction: faction)
-        guard fit > 0 else { return }
-        addGood(drop.good, fit)
-        if fit >= drop.amount {
-            supplyQueue.remove(at: index)
-        } else {
-            drop.amount -= fit
-            supplyQueue[index] = drop
+        prioritizeDeliverableSupplies(faction: faction)
+
+        var guardSteps = supplyQueue.count + 4
+        while !supplyQueue.isEmpty, guardSteps > 0 {
+            guardSteps -= 1
+            prioritizeDeliverableSupplies(faction: faction)
+            guard canDeliverSupply(supplyQueue[0], faction: faction) else { break }
+            var drop = supplyQueue[0]
+            let fit = drop.good == .gold
+                ? drop.amount
+                : unitsThatFit(drop.good, adding: drop.amount, faction: faction)
+            guard fit > 0 else { break }
+            addGood(drop.good, fit)
+            if fit >= drop.amount {
+                supplyQueue.remove(at: 0)
+            } else {
+                drop.amount -= fit
+                supplyQueue[0] = drop
+                // Dio je ušao; ostatak čeka novo mjesto — na kraj da ne koči sljedeće.
+                let leftover = supplyQueue.remove(at: 0)
+                supplyQueue.append(leftover)
+            }
         }
+
         if supplyQueue.isEmpty {
             supplyClock?.invalidate()
             supplyClock = nil
@@ -1810,7 +1839,7 @@ final class GameState: ObservableObject {
         }
     }
 
-    /// Upiše naručenu robu u vidljivi red. Zlato je već u kesi; ostalo čeka dok ima mjesta.
+    /// Upiše naručenu robu u vidljivi red. Što može — odmah; što nema skladišta — na kraj reda.
     func applyPendingStartGoods() {
         let waiting = pendingStartGoods.sorted { $0.key.rawValue < $1.key.rawValue }
         pendingStartGoods = [:]
@@ -2064,7 +2093,7 @@ extension GameState {
         }
         if !isMapEditorMode {
             let name = ObjectCatalog.shared.object(id: objectId)?.name ?? objectId
-            MatchHistoryStore.shared.noteBuild(from: self, name: name, row: row, col: col)
+            MatchHistoryStore.shared.noteBuild(from: self, name: name, objectId: objectId, row: row, col: col)
             profileBuildingsPlaced += 1
         }
         return true
@@ -3233,6 +3262,7 @@ private extension GameState {
     static let autoSaveEnabledKey = "Feudalism.autoSaveEnabled"
     static let autoSaveIntervalMinutesKey = "Feudalism.autoSaveIntervalMinutes"
     static let showTutorialHintsKey = "Feudalism.showTutorialHints"
+    static let showContextualShortcutsKey = "Feudalism.showContextualShortcuts"
     static let cameraSensitivityKey = "Feudalism.cameraSensitivity"
     static let invertYAxisKey = "Feudalism.invertYAxis"
     static let reduceMotionKey = "Feudalism.reduceMotion"

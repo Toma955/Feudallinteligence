@@ -233,13 +233,13 @@ struct MenuBrandIsland: View {
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.95))
             HStack(spacing: 8) {
-                soloActionButton(soloResourcesTitle, active: soloResourcesOn, id: "solo_section_resursi") {
+                soloActionButton(soloResourcesTitle, active: soloResourcesOn, id: "solo_section_resursi", help: .soloResources) {
                     onSoloResources?()
                 }
-                soloActionButton(soloImportTitle, active: false, id: "solo_import_map") {
+                soloActionButton(soloImportTitle, active: false, id: "solo_import_map", help: .soloImport) {
                     onSoloImport?()
                 }
-                soloActionButton(soloPersonaTitle, active: soloPersonaOn, id: "solo_section_osoba") {
+                soloActionButton(soloPersonaTitle, active: soloPersonaOn, id: "solo_section_osoba", help: .soloPersona) {
                     onSoloPersona?()
                 }
             }
@@ -252,20 +252,20 @@ struct MenuBrandIsland: View {
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.95))
             HStack(spacing: 8) {
-                aboutIconButton("info.circle.fill", aboutInfoTitle, active: false, id: "about_info") {
+                aboutIconButton("info.circle.fill", aboutInfoTitle, active: false, id: "about_info", help: .aboutInfo) {
                     onAboutInfo?()
                 }
-                aboutIconButton("book.fill", aboutHowToTitle, active: false, id: "about_how_to") {
+                aboutIconButton("book.fill", aboutHowToTitle, active: false, id: "about_how_to", help: .aboutHowTo) {
                     onAboutHowTo?()
                 }
-                aboutIconButton("square.grid.2x2.fill", aboutElementsTitle, active: true, id: "about_elements") {
+                aboutIconButton("square.grid.2x2.fill", aboutElementsTitle, active: true, id: "about_elements", help: .aboutElements) {
                     onAboutElements?()
                 }
             }
         }
     }
 
-    private func aboutIconButton(_ icon: String, _ title: String, active: Bool, id: String, action: @escaping () -> Void) -> some View {
+    private func aboutIconButton(_ icon: String, _ title: String, active: Bool, id: String, help: ContextualHelpID, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Image(systemName: icon)
@@ -280,9 +280,10 @@ struct MenuBrandIsland: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(id)
+        .contextualHelp(help)
     }
 
-    private func soloActionButton(_ title: String, active: Bool, id: String, action: @escaping () -> Void) -> some View {
+    private func soloActionButton(_ title: String, active: Bool, id: String, help: ContextualHelpID, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
@@ -293,6 +294,7 @@ struct MenuBrandIsland: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(id)
+        .contextualHelp(help)
     }
 
     private var avatarButton: some View {
@@ -315,6 +317,7 @@ struct MenuBrandIsland: View {
         }
         .buttonStyle(.plain)
         .help(LocalizedStrings.string(for: "menu_pick_avatar", language: gameState.appLanguage))
+        .contextualHelp(.islandAvatar)
     }
 
     private var nameRow: some View {
@@ -341,11 +344,11 @@ struct MenuBrandIsland: View {
 
     private var buttonsRow: some View {
         HStack(spacing: 6) {
-            islandButton(icon: "person.2.fill", titleKey: "island_multiplayer", action: onMultiplayer)
+            islandButton(icon: "person.2.fill", titleKey: "island_multiplayer", help: .islandMultiplayer, action: onMultiplayer)
             ecoButton
-            islandButton(icon: "sportscourt.fill", titleKey: "island_training", action: onTraining)
-            islandButton(icon: "text.alignleft", titleKey: "island_history", action: onHistory)
-            islandButton(icon: "person.crop.circle.badge.plus", titleKey: "island_friends", action: onFriends)
+            islandButton(icon: "sportscourt.fill", titleKey: "island_training", help: .islandTraining, action: onTraining)
+            islandButton(icon: "text.alignleft", titleKey: "island_history", help: .islandHistory, action: onHistory)
+            islandButton(icon: "person.crop.circle.badge.plus", titleKey: "island_friends", help: .islandFriends, action: onFriends)
         }
     }
 
@@ -409,9 +412,10 @@ struct MenuBrandIsland: View {
         }
         .buttonStyle(.plain)
         .help(mode.title)
+        .contextualHelp(.islandPower)
     }
 
-    private func islandButton(icon: String, titleKey: String, action: @escaping () -> Void) -> some View {
+    private func islandButton(icon: String, titleKey: String, help: ContextualHelpID, action: @escaping () -> Void) -> some View {
         let title = LocalizedStrings.string(for: titleKey, language: gameState.appLanguage)
         return Button(action: action) {
             HStack(spacing: 6) {
@@ -429,6 +433,7 @@ struct MenuBrandIsland: View {
         }
         .buttonStyle(.plain)
         .help(title)
+        .contextualHelp(help)
     }
 
     /// Svi gumbi u redu imaju širinu najdužeg natpisa, uključujući Eco, Normalno i Max.

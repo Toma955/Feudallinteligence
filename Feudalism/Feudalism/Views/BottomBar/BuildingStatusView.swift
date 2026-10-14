@@ -62,6 +62,9 @@ struct BuildingStatusView: View {
             if mine, p.objectId == Engineering.objectId {
                 SpecialistPanelView(faction: faction, types: [.engineer])
             }
+            if mine, p.objectId == Academy.objectId {
+                SpecialistPanelView(faction: faction, types: SpecialistType.academyTypes)
+            }
             if mine, p.objectId == Market.objectId, state.hasWorkerInside {
                 MarketStockPanel(focused: $marketFocused, sells: false, adjusts: true)
             }

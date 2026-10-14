@@ -172,7 +172,8 @@ struct BuildCategoryContent: View {
                 onSelectGreenHouse: { select(Greenhouse.objectId) },
                 onSelectHotel: { select(Hotel.objectId) },
                 onSelectChurch: { select(Church.objectId) },
-                onSelectDiplomacy: { select(Diplomacy.objectId) }
+                onSelectDiplomacy: { select(Diplomacy.objectId) },
+                onSelectAcademy: { select(Academy.objectId) }
             )
         case .food:
             FoodButtonExpandedView(

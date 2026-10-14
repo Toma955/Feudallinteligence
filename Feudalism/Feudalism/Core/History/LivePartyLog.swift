@@ -28,7 +28,8 @@ final class LivePartyLog: ObservableObject {
         row: Int,
         col: Int,
         population: Int? = nil,
-        happiness: Int? = nil
+        happiness: Int? = nil,
+        actionId: String? = nil
     ) {
         decisions.append(MatchDecision(
             id: UUID().uuidString,
@@ -38,12 +39,13 @@ final class LivePartyLog: ObservableObject {
             row: row,
             col: col,
             population: population,
-            happiness: happiness
+            happiness: happiness,
+            actionId: actionId
         ))
         trim()
     }
 
-    func noteBuild(from state: GameState, name: String, row: Int, col: Int) {
+    func noteBuild(from state: GameState, name: String, row: Int, col: Int, actionId: String? = nil) {
         let actor = state.playerSeat?.displayName ?? state.playerProfileName
         let trimmed = actor.trimmingCharacters(in: .whitespacesAndNewlines)
         let who = trimmed.isEmpty ? "Igrač" : trimmed
@@ -58,7 +60,8 @@ final class LivePartyLog: ObservableObject {
             row: row,
             col: col,
             population: pop,
-            happiness: happy
+            happiness: happy,
+            actionId: actionId
         )
     }
 
@@ -69,7 +72,8 @@ final class LivePartyLog: ObservableObject {
             second: max(0, state.currentTurn - 1),
             action: "srušio \(name)",
             row: row,
-            col: col
+            col: col,
+            actionId: "action:demolish"
         )
     }
 
@@ -80,17 +84,19 @@ final class LivePartyLog: ObservableObject {
             second: max(0, state.currentTurn - 1),
             action: action,
             row: row,
-            col: col
+            col: col,
+            actionId: "action:send_army"
         )
     }
 
-    func noteAI(from state: GameState, lord: String, text: String, row: Int, col: Int) {
+    func noteAI(from state: GameState, lord: String, text: String, row: Int, col: Int, actionId: String? = nil) {
         note(
             actor: lord,
             second: max(0, state.currentTurn - 1),
             action: text,
             row: row,
-            col: col
+            col: col,
+            actionId: actionId
         )
     }
 

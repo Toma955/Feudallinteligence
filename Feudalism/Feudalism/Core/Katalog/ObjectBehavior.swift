@@ -148,6 +148,7 @@ enum ObjectBehaviorRegistry {
             Gates.objectId,
             Miners.objectId,
             Engineering.objectId,
+            Academy.objectId,
             TowerRoundTall.objectId,
             TowerSquareSmall.objectId,
             TowerSquareMedium.objectId,
@@ -262,6 +263,8 @@ enum ObjectBehaviorRegistry {
             return .standard(healthLevels: 4, hpPerLevel: 8, isFlammable: true, fireDamagePerTick: 2, buildCost: .zero)
         case Engineering.objectId:
             return .standard(healthLevels: 4, hpPerLevel: 8, isFlammable: true, fireDamagePerTick: 2, buildCost: .zero)
+        case Academy.objectId:
+            return .standard(healthLevels: 5, hpPerLevel: 10, isFlammable: true, fireDamagePerTick: 2, buildCost: .zero)
         case Lager.objectId:
             return .standard(healthLevels: 3, hpPerLevel: 8, isFlammable: true, fireDamagePerTick: 2, buildCost: .zero)
         case Wood.objectId:

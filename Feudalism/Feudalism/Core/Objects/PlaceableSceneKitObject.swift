@@ -74,6 +74,7 @@ enum PlaceableSceneKitTypes {
         Gates.self,
         Miners.self,
         Engineering.self,
+        Academy.self,
         TowerRoundTall.self,
         TowerSquareSmall.self,
         TowerSquareMedium.self,

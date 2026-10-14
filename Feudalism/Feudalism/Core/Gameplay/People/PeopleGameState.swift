@@ -379,7 +379,7 @@ extension GameState {
     /// Što fali za obuku specijalista; nil = može se obučiti.
     func specialistTrainingProblem(_ type: SpecialistType, faction: String) -> String? {
         if specialistBuilding(type, of: faction) == nil {
-            return type == .miner ? "Treba Rudari." : "Treba Inženjering."
+            return type.missingBuildingMessage
         }
         let price = PriceList.specialistPrice(type)
         if let lack = missing(for: price, faction: faction) { return "Nedostaje \(lack)." }

@@ -165,6 +165,21 @@ enum BuildingShapes {
         return root
     }
 
+    static func academy() -> SCNNode {
+        let root = named("academy")
+        k.slab(to: root, width: 5 * s, depth: 5 * s, color: k.stone)
+        k.box(to: root, 4.0 * s, 3.2 * s, 3.8 * s, k.plaster, at: SCNVector3(0, 1.6 * s, 0))
+        k.roof(to: root, width: 4.5 * s, length: 4.2 * s, height: 1.6 * s, color: k.roofDark, y: 3.2 * s)
+        k.box(to: root, 1.4 * s, 2.2 * s, 1.4 * s, k.stone, at: SCNVector3(0, 4.3 * s, -0.2 * s))
+        k.cone(to: root, top: 0, bottom: 1.0 * s, height: 1.3 * s, color: k.roofTile, at: SCNVector3(0, 5.7 * s, -0.2 * s))
+        for x in [-1.4, 0, 1.4] {
+            k.cylinder(to: root, radius: 0.12 * s, height: 2.0 * s, color: k.stoneDark, at: SCNVector3(x * s, 1.05 * s, 2.05 * s), segments: 8)
+        }
+        k.box(to: root, 2.8 * s, 0.16 * s, 0.5 * s, k.stone, at: SCNVector3(0, 2.15 * s, 2.05 * s))
+        k.box(to: root, 0.65 * s, 1.4 * s, 0.08 * s, k.door, at: SCNVector3(0, 0.75 * s, 1.95 * s))
+        return root
+    }
+
     static func pharmacy() -> SCNNode {
         let root = named("pharmacy")
         k.slab(to: root, width: 6 * s, depth: 6 * s, color: k.earth)

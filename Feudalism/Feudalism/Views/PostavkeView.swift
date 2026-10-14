@@ -45,6 +45,7 @@ struct PostavkeView: View {
 
 enum PostavkeSection: String, CaseIterable, Identifiable {
     case general
+    case personalization
     case controls
     case audio
     case video
@@ -59,6 +60,7 @@ enum PostavkeSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .general: return "Općenito"
+        case .personalization: return "Personalizacija"
         case .controls: return "Kontrola"
         case .audio: return "Zvuk"
         case .video: return "Slika"
@@ -73,6 +75,7 @@ enum PostavkeSection: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .general: return "gearshape"
+        case .personalization: return "textformat.abc"
         case .controls: return "keyboard"
         case .audio: return "speaker.wave.2"
         case .video: return "display"
@@ -107,6 +110,7 @@ struct PostavkeSectionContent: View {
         Group {
             switch section {
             case .general: generalContent
+            case .personalization: personalizationContent
             case .controls: controlsContent
             case .audio: audioContent
             case .video: videoContent
@@ -117,6 +121,25 @@ struct PostavkeSectionContent: View {
             case .ble: bleContent
             }
         }
+    }
+
+    private var personalizationContent: some View {
+        Form {
+            Section {
+                Toggle("Kratice", isOn: $gameState.showContextualShortcuts)
+                Text("Kad je upaljeno: miš iznad ikone ili resursa odmah pokazuje natpis ispod islanda. Ako se zadržiš, pojavi se info gumb (klik = objašnjenje). Ako ne makneš miš i ne klikneš, info se sam zatvori nakon 10 sekundi.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Kratice")
+            } footer: {
+                Label("Isključeno = bez natpisa i info gumbića.", systemImage: "info.circle")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
     }
 
     private var generalContent: some View {

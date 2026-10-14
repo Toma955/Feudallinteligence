@@ -15,6 +15,7 @@ struct HouseButtonExpandedView: View {
     var onSelectHotel: () -> Void
     var onSelectChurch: () -> Void
     var onSelectDiplomacy: () -> Void
+    var onSelectAcademy: () -> Void
 
     var body: some View {
         CategoryExpandedView(items: [
@@ -24,6 +25,7 @@ struct HouseButtonExpandedView: View {
             CategoryExpandedItem(assetName: "hotel", systemName: "building.2.fill", labelKey: "house_hotel", action: onSelectHotel),
             CategoryExpandedItem(assetName: "church", systemName: "building.columns.fill", labelKey: "house_church", action: onSelectChurch),
             CategoryExpandedItem(assetName: "message", systemName: "envelope.fill", labelKey: "house_diplomacy", action: onSelectDiplomacy),
+            CategoryExpandedItem(assetName: "message", systemName: "building.columns.fill", labelKey: "house_academy", action: onSelectAcademy),
         ])
     }
 }

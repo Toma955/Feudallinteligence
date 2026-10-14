@@ -381,6 +381,17 @@ struct MatchHistoryView: View {
                             .foregroundStyle(.white.opacity(0.6))
                     }
                     Spacer()
+                    Button {
+                        TrainingSession.shared.selectMatchForTraining(id: record.id)
+                    } label: {
+                        Text(L("history_train_match"))
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.yellow.opacity(0.9), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
                     if let result = record.result {
                         Text(result)
                             .font(.system(size: 12, weight: .semibold))

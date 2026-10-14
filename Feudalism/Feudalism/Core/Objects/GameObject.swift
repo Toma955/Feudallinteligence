@@ -122,6 +122,7 @@ extension ObjectCategory {
                 Gates.gameObject,
                 Miners.gameObject,
                 Engineering.gameObject,
+                Academy.gameObject,
                 Pharmacy.gameObject,
                 Greenhouse.gameObject,
                 Church.gameObject,

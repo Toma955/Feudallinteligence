@@ -146,33 +146,39 @@ struct MainMenuView: View {
                             withAnimation(menuIslandMotion) { islandExpanded = false }
                         }
                 }
-                MenuBrandIsland(
-                    isExpanded: $islandExpanded,
-                    onMultiplayer: { openIslandPage(.multiplayer) },
-                    onTraining: { openIslandPage(.training) },
-                    onHistory: { openIslandPage(.history) },
-                    onFriends: { openIslandPage(.friends) },
-                    onPickAvatar: pickAvatar,
-                    soloTitle: showSoloSetup ? L("menu_solo") : nil,
-                    soloResourcesTitle: L("solo_resources"),
-                    soloImportTitle: L("solo_import_map"),
-                    soloPersonaTitle: L("solo_persona"),
-                    soloResourcesOn: soloShowResources,
-                    soloPersonaOn: soloShowPersona,
-                    onSoloResources: toggleSoloResources,
-                    onSoloImport: requestSoloImport,
-                    onSoloPersona: toggleSoloPersona,
-                    aboutTitle: showAbout ? L("menu_about") : nil,
-                    aboutInfoTitle: L("about_info"),
-                    aboutHowToTitle: L("about_how_to"),
-                    aboutElementsTitle: L("about_elements"),
-                    onAboutInfo: openAboutInfo,
-                    onAboutHowTo: openAboutHowTo,
-                    onAboutElements: openAboutElements
-                )
+                VStack(spacing: 10) {
+                    MenuBrandIsland(
+                        isExpanded: $islandExpanded,
+                        onMultiplayer: { openIslandPage(.multiplayer) },
+                        onTraining: { openIslandPage(.training) },
+                        onHistory: { openIslandPage(.history) },
+                        onFriends: { openIslandPage(.friends) },
+                        onPickAvatar: pickAvatar,
+                        soloTitle: showSoloSetup ? L("menu_solo") : nil,
+                        soloResourcesTitle: L("solo_resources"),
+                        soloImportTitle: L("solo_import_map"),
+                        soloPersonaTitle: L("solo_persona"),
+                        soloResourcesOn: soloShowResources,
+                        soloPersonaOn: soloShowPersona,
+                        onSoloResources: toggleSoloResources,
+                        onSoloImport: requestSoloImport,
+                        onSoloPersona: toggleSoloPersona,
+                        aboutTitle: showAbout ? L("menu_about") : nil,
+                        aboutInfoTitle: L("about_info"),
+                        aboutHowToTitle: L("about_how_to"),
+                        aboutElementsTitle: L("about_elements"),
+                        onAboutInfo: openAboutInfo,
+                        onAboutHowTo: openAboutHowTo,
+                        onAboutElements: openAboutElements
+                    )
+                    ContextualHelpCaptionBar()
+                }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .padding(.top, titleTopPadding)
             }
+
+            ContextualHelpDetailSheet()
+                .zIndex(40)
             if !hideTitle, islandPage == .history {
                 recordingDock
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -200,6 +206,13 @@ struct MainMenuView: View {
                 soloShowResources = false
                 soloShowPersona = false
                 islandExpanded = false
+            }
+        }
+        .onChange(of: trainingSession.jumpToTraining) { go in
+            guard go else { return }
+            trainingSession.jumpToTraining = false
+            withAnimation(.easeInOut(duration: menuPostavkeTransitionDuration)) {
+                openIslandPage(.training)
             }
         }
         .onChange(of: showAbout) { open in

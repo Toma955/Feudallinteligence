@@ -38,6 +38,17 @@ final class MatchHistoryStore: ObservableObject {
         return loadRecord(id: id)
     }
 
+    /// Ažuriraj snimku na disku (npr. ocjene odluka iz Analize).
+    func updateRecord(_ record: MatchHistoryRecord) {
+        if draft?.id == record.id {
+            draft = record
+        }
+        upsertSummary(record.summary)
+        saveFile(record)
+        writeIndex()
+        objectWillChange.send()
+    }
+
     /// Trajno obriši snimku s diska i iz popisa.
     @discardableResult
     func deleteRecord(id: String) -> Bool {
@@ -103,14 +114,24 @@ final class MatchHistoryStore: ObservableObject {
     }
 
     /// Građevina je pala na mapu: sekunda, koordinata, populacija i sreća u tom trenu.
-    func noteBuild(from state: GameState, name: String, row: Int, col: Int) {
-        LivePartyLog.shared.noteBuild(from: state, name: name, row: row, col: col)
+    func noteBuild(from state: GameState, name: String, objectId: String, row: Int, col: Int) {
+        let actionId = "action:build:\(objectId)"
+        LivePartyLog.shared.noteBuild(from: state, name: name, row: row, col: col, actionId: actionId)
         if draft == nil { beginRecording(from: state) }
         guard draft != nil else { return }
         let actor = recordedActor(from: state)
         let people = peopleNow(in: state, actor: actor)
         let action = "izgradio \(name) · populacija \(people.population) · sreća \(people.happiness)%"
-        recordDecision(actor: actor, second: max(0, state.currentTurn - 1), action: action, row: row, col: col, population: people.population, happiness: people.happiness)
+        recordDecision(
+            actor: actor,
+            second: max(0, state.currentTurn - 1),
+            action: action,
+            row: row,
+            col: col,
+            population: people.population,
+            happiness: people.happiness,
+            actionId: actionId
+        )
         events.append(MatchTimelineEvent(
             id: UUID().uuidString,
             second: max(0, state.currentTurn - 1),
@@ -131,12 +152,22 @@ final class MatchHistoryStore: ObservableObject {
     }
 
     /// Kako je AI lord razmišljao i što je iz toga napravio.
-    func noteThought(from state: GameState, lord: String, text: String, row: Int, col: Int) {
-        LivePartyLog.shared.noteAI(from: state, lord: lord, text: text, row: row, col: col)
+    func noteThought(from state: GameState, lord: String, text: String, row: Int, col: Int, actionId: String? = nil) {
+        let resolved = actionId ?? AIMatchPolicyTraining.inferActionId(from: text)
+        LivePartyLog.shared.noteAI(from: state, lord: lord, text: text, row: row, col: col, actionId: resolved)
         guard draft != nil else { return }
         let people = peopleNow(in: state, actor: lord)
         let action = "\(text) · populacija \(people.population) · sreća \(people.happiness)%"
-        recordDecision(actor: lord, second: max(0, state.currentTurn - 1), action: action, row: row, col: col, population: people.population, happiness: people.happiness)
+        recordDecision(
+            actor: lord,
+            second: max(0, state.currentTurn - 1),
+            action: action,
+            row: row,
+            col: col,
+            population: people.population,
+            happiness: people.happiness,
+            actionId: resolved
+        )
         events.append(MatchTimelineEvent(
             id: UUID().uuidString,
             second: max(0, state.currentTurn - 1),
@@ -250,7 +281,16 @@ final class MatchHistoryStore: ObservableObject {
         summaries = Array(summaries.prefix(maxStoredMatches))
     }
 
-    private func recordDecision(actor: String, second: Int, action: String, row: Int, col: Int, population: Int, happiness: Int) {
+    private func recordDecision(
+        actor: String,
+        second: Int,
+        action: String,
+        row: Int,
+        col: Int,
+        population: Int,
+        happiness: Int,
+        actionId: String? = nil
+    ) {
         guard var record = draft else { return }
         var list = record.decisions ?? []
         list.append(MatchDecision(
@@ -261,7 +301,8 @@ final class MatchHistoryStore: ObservableObject {
             row: row,
             col: col,
             population: population,
-            happiness: happiness
+            happiness: happiness,
+            actionId: actionId
         ))
         record.decisions = list
         draft = record

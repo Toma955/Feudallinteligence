@@ -2,7 +2,7 @@
 //  SpecialistPanelView.swift
 //  Feudalism
 //
-//  Rudari / Inženjering: kartice za Rudara i Srednjovjekovnog inženjera.
+//  Rudari / Inženjering / Akademija: kartice specijalista.
 //  Klik kupi / trenira jednog od slobodnog seljaka.
 //
 
@@ -23,10 +23,13 @@ struct SpecialistPanelView: View {
             .font(.system(size: 12, weight: .medium))
             .foregroundStyle(.white.opacity(0.8))
 
-            HStack(spacing: 8) {
-                ForEach(types) { type in
-                    card(type)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(types) { type in
+                        card(type)
+                    }
                 }
+                .padding(.vertical, 2)
             }
         }
     }
@@ -89,7 +92,7 @@ struct SpecialistIcon: View {
                 .frame(width: size * 0.1, height: size * 0.3)
                 .offset(x: size * 0.07, y: size * 0.32)
             RoundedRectangle(cornerRadius: size * 0.06)
-                .fill(type == .miner ? Color(red: 0.45, green: 0.38, blue: 0.28) : Color(red: 0.28, green: 0.36, blue: 0.48))
+                .fill(tunicColor)
                 .frame(width: size * 0.3, height: size * 0.36)
                 .offset(y: size * 0.06)
             Circle().fill(skin)
@@ -101,5 +104,17 @@ struct SpecialistIcon: View {
                 .offset(x: size * 0.26, y: size * 0.02)
         }
         .frame(width: size, height: size)
+    }
+
+    private var tunicColor: Color {
+        switch type {
+        case .miner: return Color(red: 0.45, green: 0.38, blue: 0.28)
+        case .engineer: return Color(red: 0.28, green: 0.36, blue: 0.48)
+        case .attackCommander: return Color(red: 0.62, green: 0.16, blue: 0.14)
+        case .defenseCommander: return Color(red: 0.22, green: 0.32, blue: 0.55)
+        case .diplomat: return Color(red: 0.45, green: 0.32, blue: 0.55)
+        case .logistician: return Color(red: 0.35, green: 0.48, blue: 0.32)
+        case .spy: return Color(red: 0.18, green: 0.18, blue: 0.22)
+        }
     }
 }

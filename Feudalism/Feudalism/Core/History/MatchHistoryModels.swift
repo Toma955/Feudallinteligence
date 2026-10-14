@@ -62,6 +62,21 @@ struct MatchTimelineEvent: Codable, Equatable, Identifiable {
     var happiness: Int? = nil
 }
 
+/// Ocjena odluke iz Analize (dobra / loša / neutralna).
+enum DecisionQuality: String, Codable, Equatable, CaseIterable {
+    case good
+    case bad
+    case neutral
+
+    var localeKey: String {
+        switch self {
+        case .good: return "train_decision_good"
+        case .bad: return "train_decision_bad"
+        case .neutral: return "train_decision_neutral"
+        }
+    }
+}
+
 /// Jedna odluka u snimci: tko, u kojoj sekundi, što.
 struct MatchDecision: Codable, Equatable, Identifiable {
     var id: String
@@ -72,6 +87,52 @@ struct MatchDecision: Codable, Equatable, Identifiable {
     var col: Int
     var population: Int? = nil
     var happiness: Int? = nil
+    /// Id iz AI rječnika (npr. `action:build:house`) — za trening politike.
+    var actionId: String? = nil
+    /// Ocjena iz Analize: good / bad / neutral.
+    var quality: DecisionQuality? = nil
+
+    private enum CodingKeys: String, CodingKey {
+        case id, second, actor, action, row, col, population, happiness, actionId, quality
+    }
+
+    init(
+        id: String,
+        second: Int,
+        actor: String,
+        action: String,
+        row: Int,
+        col: Int,
+        population: Int? = nil,
+        happiness: Int? = nil,
+        actionId: String? = nil,
+        quality: DecisionQuality? = nil
+    ) {
+        self.id = id
+        self.second = second
+        self.actor = actor
+        self.action = action
+        self.row = row
+        self.col = col
+        self.population = population
+        self.happiness = happiness
+        self.actionId = actionId
+        self.quality = quality
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        second = try c.decode(Int.self, forKey: .second)
+        actor = try c.decode(String.self, forKey: .actor)
+        action = try c.decode(String.self, forKey: .action)
+        row = try c.decode(Int.self, forKey: .row)
+        col = try c.decode(Int.self, forKey: .col)
+        population = try c.decodeIfPresent(Int.self, forKey: .population)
+        happiness = try c.decodeIfPresent(Int.self, forKey: .happiness)
+        actionId = try c.decodeIfPresent(String.self, forKey: .actionId)
+        quality = try c.decodeIfPresent(DecisionQuality.self, forKey: .quality)
+    }
 }
 
 struct MatchHistoryFrame: Codable, Identifiable {

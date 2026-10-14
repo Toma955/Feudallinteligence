@@ -105,9 +105,10 @@ enum AIMatchReview {
                 delta: 0.08
             ))
         }
-        let soldiersNow = count("V", in: army) + count("v", in: army)
-        let peopleThen = count("P", in: earlyArmy) + count("p", in: earlyArmy) + count("R", in: earlyArmy) + count("r", in: earlyArmy)
-        if soldiersNow == 0 && peopleThen > 0 {
+        // Army matrica je numerička (tip,broj,…); stari glifovi V/P i dalje se broje ako postoje.
+        let soldiersNow = armySoldierCount(army)
+        let peopleThen = max(armySoldierCount(earlyArmy), count("P", in: earlyArmy) + count("p", in: earlyArmy))
+        if soldiersNow == 0 && (peopleThen > 0 || count("H", in: first.buildings) > 0) {
             list.append(AIMatchLesson(
                 id: "no-army",
                 title: "Nitko nije vojnik",
@@ -210,5 +211,15 @@ enum AIMatchReview {
 
     private static func count(_ mark: Character, in text: String) -> Int {
         text.reduce(0) { $0 + ($1 == mark ? 1 : 0) }
+    }
+
+    private static func armySoldierCount(_ army: String) -> Int {
+        var n = 0
+        for token in army.split(whereSeparator: { $0 == " " || $0 == "\n" }) {
+            let parts = token.split(separator: ",")
+            guard parts.count >= 2, let type = Int(parts[0]), let count = Int(parts[1]), type > 0 else { continue }
+            n += count
+        }
+        return n + count("V", in: army) + count("v", in: army)
     }
 }
