@@ -159,6 +159,7 @@ enum TextMapCapture {
 
     private static func roadObject(_ objectId: String) -> Bool {
         objectId == Road.objectId || objectId == Bridge.objectId || objectId == StoneSlab.objectId || objectId == Tunnel.objectId
+            || objectId == Canal.objectId || objectId == River.objectId
     }
 
     private static func cellToken(_ surface: GameMap, row: Int, col: Int, road: Bool, blocked: Bool) -> String {
@@ -172,13 +173,15 @@ enum TextMapCapture {
 
     /// 0 ne prolazi, 0.5 spor teren, 1 ravno, 1.5 padina ili cesta, 2 oboje.
     private static func walkCode(cell: MapCell, road: Bool, sloped: Bool, blocked: Bool) -> String {
-        if blocked || !cell.walkable || cell.movementIndex <= 0 || cell.povrsina == .voda || cell.povrsina == .more {
+        // More uvijek neprohodno; voda (rijeka) isto osim ako je eksplicitno jezero (movementIndex > 0).
+        if blocked || !cell.walkable || cell.movementIndex <= 0 || cell.povrsina == .more {
             return "0"
         }
         if sloped && road { return "2" }
         if sloped || road { return "1.5" }
         switch cell.povrsina {
-        case .pustinja, .kamen, .mocvara: return "0.5"
+        case .pustinja, .kamen, .obala: return "0.5"
+        case .voda: return "1" // jezero (prohodna voda)
         default: return "1"
         }
     }

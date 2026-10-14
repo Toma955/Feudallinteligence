@@ -117,8 +117,6 @@ extension ObjectCategory {
                 Castle.gameObject,
                 Steps.gameObject,
                 House.gameObject,
-                Well.gameObject,
-                Spring.gameObject,
                 Hotel.gameObject,
                 Stable.gameObject,
                 Gates.gameObject,
@@ -128,8 +126,7 @@ extension ObjectCategory {
                 Greenhouse.gameObject,
                 Church.gameObject,
                 Diplomacy.gameObject,
-                GameObject(name: "Kula", category: .dvorac, width: 3, height: 3),
-            ]
+            ] + TowerKind.allCases.map { Tower.gameObject($0) }
         case .vojnici:
             return [
                 GameObject(name: "Vitez", category: .vojnici),
@@ -157,6 +154,10 @@ extension ObjectCategory {
                 StoneSlab.gameObject,
                 Bridge.gameObject,
                 Tunnel.gameObject,
+                Canal.gameObject,
+                River.gameObject,
+                Well.gameObject,
+                Spring.gameObject,
                 Flag.gameObject,
                 Torch.gameObject,
                 Monument.gameObject,
@@ -169,6 +170,7 @@ extension ObjectCategory {
             return [
                 UndergroundEntrance.gameObject,
                 UndergroundCorridor.gameObject,
+                UndergroundLightOpening.gameObject,
                 Smocnica.gameObject,
                 Lager.gameObject
             ]

@@ -2,8 +2,8 @@
 //  Infrastructure.swift
 //  Feudalism
 //
-//  Infrastruktura i ukras dvorca: cesta, ploča, most, tunel, zastava, baklja,
-//  spomenik, svijeća, ukrasno stablo, fontana.
+//  Infrastruktura: cesta, podloga, most, tunel, kanal, rijeka;
+//  ukras: zastava, baklja, spomenik, svijeća, ukrasno stablo, fontana.
 //
 
 import Foundation
@@ -26,7 +26,7 @@ enum StoneSlab: PlaceableSceneKitObject {
     static let displayCode = "PL"
     static var gameObject: GameObject {
         let d = ObjectDimensions.stoneSlab
-        return GameObject(id: objectId, name: "Kamena ploča", category: .infrastruktura, width: d.cellWidth, height: d.cellHeight, displayCode: displayCode, modelAssetName: nil)
+        return GameObject(id: objectId, name: "Podloga", category: .infrastruktura, width: d.cellWidth, height: d.cellHeight, displayCode: displayCode, modelAssetName: nil)
     }
     static func loadSceneKitNode(from bundle: Bundle = .main) -> SCNNode? { InfrastructureShapes.stoneSlab() }
     static func reapplyTexture(to node: SCNNode, bundle: Bundle = .main) -> Bool { true }
@@ -51,6 +51,28 @@ enum Tunnel: PlaceableSceneKitObject {
         return GameObject(id: objectId, name: "Tunel", category: .infrastruktura, width: d.cellWidth, height: d.cellHeight, displayCode: displayCode, modelAssetName: nil)
     }
     static func loadSceneKitNode(from bundle: Bundle = .main) -> SCNNode? { InfrastructureShapes.tunnel() }
+    static func reapplyTexture(to node: SCNNode, bundle: Bundle = .main) -> Bool { true }
+}
+
+enum Canal: PlaceableSceneKitObject {
+    static let objectId = "object_canal"
+    static let displayCode = "KA"
+    static var gameObject: GameObject {
+        let d = ObjectDimensions.canal
+        return GameObject(id: objectId, name: "Kanal", category: .infrastruktura, width: d.cellWidth, height: d.cellHeight, displayCode: displayCode, modelAssetName: nil)
+    }
+    static func loadSceneKitNode(from bundle: Bundle = .main) -> SCNNode? { InfrastructureShapes.canal() }
+    static func reapplyTexture(to node: SCNNode, bundle: Bundle = .main) -> Bool { true }
+}
+
+enum River: PlaceableSceneKitObject {
+    static let objectId = "object_river"
+    static let displayCode = "RI"
+    static var gameObject: GameObject {
+        let d = ObjectDimensions.river
+        return GameObject(id: objectId, name: "Rijeka", category: .infrastruktura, width: d.cellWidth, height: d.cellHeight, displayCode: displayCode, modelAssetName: nil)
+    }
+    static func loadSceneKitNode(from bundle: Bundle = .main) -> SCNNode? { InfrastructureShapes.river() }
     static func reapplyTexture(to node: SCNNode, bundle: Bundle = .main) -> Bool { true }
 }
 

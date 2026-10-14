@@ -15,12 +15,14 @@ enum PersonRole: String, Codable, CaseIterable {
     case peasant
     case worker
     case soldier
+    case specialist
 
     var displayName: String {
         switch self {
         case .peasant: return "Seljak"
         case .worker: return "Radnik"
         case .soldier: return "Vojnik"
+        case .specialist: return "Specijalist"
         }
     }
 }
@@ -110,6 +112,8 @@ struct Person: Codable, Identifiable, Equatable {
     var weapon: Good?
     /// Vrsta vojnika (strijelac, kopljanik…); stari zapisi je nemaju pa se izvodi iz oružja.
     var soldierType: SoldierType?
+    /// Rudar / inženjer – obučen u Rudarima ili Inženjeringu.
+    var specialistType: SpecialistType?
     /// Točke puta do cilja (zaobilazi zidove i vodu); zadnja je cilj.
     var waypoints: [PathPoint]?
     /// Za koji cilj i koju verziju mape je put složen; promjena = novi put.
@@ -125,8 +129,10 @@ struct Person: Codable, Identifiable, Equatable {
     /// Množitelj brzine hoda.
     var speedFactor: Double { resolvedSoldierType?.speedFactor ?? 1 }
 
-    /// Samo vojska. Slobodna osoba kod vatre i radnik se ne označavaju.
-    var canBeMarked: Bool { role == .soldier && healthPercent > 0 }
+    /// Vojska, rudar i inženjer. Seljak kod vatre i radnik se ne označavaju.
+    var canBeMarked: Bool {
+        (role == .soldier || role == .specialist) && healthPercent > 0
+    }
     var isVisible: Bool {
         if case .working = activity { return false }
         return healthPercent > 0
@@ -140,18 +146,20 @@ struct Person: Codable, Identifiable, Equatable {
 
     var displayName: String {
         if let type = resolvedSoldierType { return type.displayName }
+        if role == .specialist, let type = specialistType { return type.displayName }
         return role.displayName
     }
 
     enum CodingKeys: String, CodingKey {
         case id, factionId, colorHex, role, activity, row, col, targetRow, targetCol
-        case layer, targetLayer, facing, walkPhase, healthPercent, slot, weapon, soldierType
+        case layer, targetLayer, facing, walkPhase, healthPercent, slot, weapon, soldierType, specialistType
         case waypoints, pathTarget, pathVersion, pathBlocked
     }
 
     init(id: String, factionId: String, colorHex: String, role: PersonRole, activity: PersonActivity,
          row: Double, col: Double, targetRow: Double, targetCol: Double, facing: Double = 0, walkPhase: Double = 0,
          healthPercent: Double = 100, slot: Int = 0, weapon: Good? = nil, soldierType: SoldierType? = nil,
+         specialistType: SpecialistType? = nil,
          waypoints: [PathPoint]? = nil, pathTarget: PathPoint? = nil, pathVersion: Int? = nil, pathBlocked: Bool? = nil,
          layer: MapLayer = .surface, targetLayer: MapLayer = .surface) {
         self.id = id
@@ -171,6 +179,7 @@ struct Person: Codable, Identifiable, Equatable {
         self.slot = slot
         self.weapon = weapon
         self.soldierType = soldierType
+        self.specialistType = specialistType
         self.waypoints = waypoints
         self.pathTarget = pathTarget
         self.pathVersion = pathVersion
@@ -196,6 +205,7 @@ struct Person: Codable, Identifiable, Equatable {
         slot = try c.decodeIfPresent(Int.self, forKey: .slot) ?? 0
         weapon = try c.decodeIfPresent(Good.self, forKey: .weapon)
         soldierType = try c.decodeIfPresent(SoldierType.self, forKey: .soldierType)
+        specialistType = try c.decodeIfPresent(SpecialistType.self, forKey: .specialistType)
         waypoints = try c.decodeIfPresent([PathPoint].self, forKey: .waypoints)
         pathTarget = try c.decodeIfPresent(PathPoint.self, forKey: .pathTarget)
         pathVersion = try c.decodeIfPresent(Int.self, forKey: .pathVersion)
@@ -221,6 +231,7 @@ struct Person: Codable, Identifiable, Equatable {
         try c.encode(slot, forKey: .slot)
         try c.encodeIfPresent(weapon, forKey: .weapon)
         try c.encodeIfPresent(soldierType, forKey: .soldierType)
+        try c.encodeIfPresent(specialistType, forKey: .specialistType)
         try c.encodeIfPresent(waypoints, forKey: .waypoints)
         try c.encodeIfPresent(pathTarget, forKey: .pathTarget)
         try c.encodeIfPresent(pathVersion, forKey: .pathVersion)
@@ -241,4 +252,5 @@ struct PersonRenderSnapshot: Equatable {
     let walkPhase: Double
     let visible: Bool
     let layer: MapLayer
+    var marked: Bool = false
 }

@@ -38,6 +38,28 @@ final class MatchHistoryStore: ObservableObject {
         return loadRecord(id: id)
     }
 
+    /// Trajno obriši snimku s diska i iz popisa.
+    @discardableResult
+    func deleteRecord(id: String) -> Bool {
+        if draft?.id == id {
+            draft = nil
+            events = []
+        }
+        let hadSummary = summaries.contains { $0.id == id }
+        try? FileManager.default.removeItem(at: recordURL(id: id))
+        summaries.removeAll { $0.id == id }
+        writeIndex()
+        return hadSummary
+    }
+
+    /// Veličina datoteke snimke (bajtovi), ako postoji.
+    func recordFileSize(id: String) -> Int64? {
+        let url = recordURL(id: id)
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attrs[.size] as? NSNumber else { return nil }
+        return size.int64Value
+    }
+
     func beginRecording(from state: GameState, forced: Bool = false) {
         guard !state.isMapEditorMode, state.isLevelReady, !state.isShowingMainMenu else { return }
         guard state.recordThisMatch || forced else { return }
@@ -82,6 +104,7 @@ final class MatchHistoryStore: ObservableObject {
 
     /// Građevina je pala na mapu: sekunda, koordinata, populacija i sreća u tom trenu.
     func noteBuild(from state: GameState, name: String, row: Int, col: Int) {
+        LivePartyLog.shared.noteBuild(from: state, name: name, row: row, col: col)
         if draft == nil { beginRecording(from: state) }
         guard draft != nil else { return }
         let actor = recordedActor(from: state)
@@ -109,6 +132,7 @@ final class MatchHistoryStore: ObservableObject {
 
     /// Kako je AI lord razmišljao i što je iz toga napravio.
     func noteThought(from state: GameState, lord: String, text: String, row: Int, col: Int) {
+        LivePartyLog.shared.noteAI(from: state, lord: lord, text: text, row: row, col: col)
         guard draft != nil else { return }
         let people = peopleNow(in: state, actor: lord)
         let action = "\(text) · populacija \(people.population) · sreća \(people.happiness)%"

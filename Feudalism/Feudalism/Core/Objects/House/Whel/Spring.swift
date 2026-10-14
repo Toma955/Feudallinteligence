@@ -16,7 +16,7 @@ enum Spring: PlaceableSceneKitObject {
 
     static var gameObject: GameObject {
         let d = ObjectDimensions.spring
-        return GameObject(id: objectId, name: "Izvor", category: .dvorac, width: d.cellWidth, height: d.cellHeight, displayCode: displayCode, modelAssetName: nil)
+        return GameObject(id: objectId, name: "Izvor", category: .infrastruktura, width: d.cellWidth, height: d.cellHeight, displayCode: displayCode, modelAssetName: nil)
     }
 
     static func loadSceneKitNode(from bundle: Bundle = .main) -> SCNNode? {

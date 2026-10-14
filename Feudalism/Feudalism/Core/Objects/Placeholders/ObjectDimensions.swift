@@ -131,6 +131,8 @@ enum ObjectDimensions {
     static let stoneSlab = ObjectDimension(cellWidth: 1, cellHeight: 1, heightCells: 1)
     static let bridge = ObjectDimension(cellWidth: 3, cellHeight: 1, heightCells: 2)
     static let tunnel = ObjectDimension(cellWidth: 2, cellHeight: 2, heightCells: 3)
+    static let canal = ObjectDimension(cellWidth: 1, cellHeight: 1, heightCells: 1)
+    static let river = ObjectDimension(cellWidth: 1, cellHeight: 1, heightCells: 1)
     static let flag = ObjectDimension(cellWidth: 1, cellHeight: 1, heightCells: 4)
     static let torch = ObjectDimension(cellWidth: 1, cellHeight: 1, heightCells: 2)
     static let monument = ObjectDimension(cellWidth: 2, cellHeight: 2, heightCells: 4)
@@ -144,4 +146,6 @@ enum ObjectDimensions {
     static let undergroundEntrance = ObjectDimension(cellWidth: 2, cellHeight: 2, heightCells: 2)
     /// Hodnik: 1×1×3.
     static let undergroundCorridor = ObjectDimension(cellWidth: 1, cellHeight: 1, heightCells: 3)
+    /// Svjetlosni otvor: 1×1×1.
+    static let undergroundLightOpening = ObjectDimension(cellWidth: 1, cellHeight: 1, heightCells: 1)
 }

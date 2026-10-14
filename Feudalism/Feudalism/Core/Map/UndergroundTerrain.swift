@@ -19,6 +19,16 @@ enum UndergroundTerrain {
     /// Visina potpuno popunjenog podzemlja (metri). Nova mapa uvijek kreće s ovom vrijednošću.
     static let filledHeight: CGFloat = 10
 
+    /// Zadana dubina mora (metri) kad se označi površina bez eksplicitne dubine.
+    static let defaultSeaDepth: CGFloat = 5
+    /// Raspon dubine mora.
+    static let seaDepthMin: CGFloat = 1
+    static let seaDepthMax: CGFloat = 10
+
+    static func clampSeaDepth(_ value: CGFloat) -> CGFloat {
+        min(seaDepthMax, max(seaDepthMin, value))
+    }
+
     /// Zadani protok izvora (jedinice po potezu). Izvor se ne briše; samo se mijenja protok.
     static let defaultSpringFlow: Double = 1
 

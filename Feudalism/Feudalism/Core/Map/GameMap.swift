@@ -37,6 +37,23 @@ final class GameMap: ObservableObject {
     @Published private(set) var cells: [String: MapCell] = [:]
     /// Postavljeni objekti – svaki zauzima width×height ćelija od (row, col).
     @Published private(set) var placements: [Placement] = []
+    /// Oblici mora iz editora (poligon linija) — render SeaBasin prati ove rubove.
+    @Published private(set) var seaPolygons: [SeaPolygonShape] = []
+
+    func setSeaPolygons(_ polygons: [SeaPolygonShape]) {
+        seaPolygons = polygons
+        objectWillChange.send()
+    }
+
+    func upsertSeaPolygon(_ shape: SeaPolygonShape) {
+        // Jedan oblik za sada zamijeni preklapajuće / dodaj.
+        if seaPolygons.isEmpty {
+            seaPolygons = [shape]
+        } else {
+            seaPolygons = [shape] // jedna aktivna površina mora iz nacrta (proširiti kasnije)
+        }
+        objectWillChange.send()
+    }
 
     init(rows: Int, cols: Int) {
         self.rows = rows
@@ -156,6 +173,31 @@ final class GameMap: ObservableObject {
         guard isValid(coordinate), var cell = cells[coordinate.cellId] else { return }
         if cell.povrsina == .more, surface != .more { return }
         cell.applySurface(surface)
+        if surface == .more, cell.seaDepth == nil {
+            cell.seaDepth = UndergroundTerrain.defaultSeaDepth
+        }
+        cells[coordinate.cellId] = cell
+        if publish { objectWillChange.send() }
+    }
+
+    /// Kao `setSurface`, ali dopušta `.more` → druga površina (uređivanje nacrta obale).
+    func setSurfaceAllowingSeaChange(at coordinate: MapCoordinate, _ surface: PovrsinaType, publish: Bool = true) {
+        guard isValid(coordinate), var cell = cells[coordinate.cellId] else { return }
+        cell.applySurface(surface)
+        if surface == .more, cell.seaDepth == nil {
+            cell.seaDepth = UndergroundTerrain.defaultSeaDepth
+        }
+        cells[coordinate.cellId] = cell
+        if publish { objectWillChange.send() }
+    }
+
+    /// Postavi dubinu mora (metri). Ćelija postaje `.more` ako već nije.
+    func setSeaDepth(at coordinate: MapCoordinate, _ depth: CGFloat, publish: Bool = true) {
+        guard isValid(coordinate), var cell = cells[coordinate.cellId] else { return }
+        if cell.povrsina != .more {
+            cell.applySurface(.more)
+        }
+        cell.seaDepth = UndergroundTerrain.clampSeaDepth(depth)
         cells[coordinate.cellId] = cell
         if publish { objectWillChange.send() }
     }
@@ -184,12 +226,12 @@ final class GameMap: ObservableObject {
     }
 
     /// Ručno promijeni indeks kretanja ćelije (0 = neprohodno).
-    func setMovementIndex(at coordinate: MapCoordinate, _ value: Double) {
+    func setMovementIndex(at coordinate: MapCoordinate, _ value: Double, publish: Bool = true) {
         guard isValid(coordinate), var cell = cells[coordinate.cellId] else { return }
         cell.movementIndex = max(0, value)
         cell.walkable = cell.movementIndex > 0
         cells[coordinate.cellId] = cell
-        objectWillChange.send()
+        if publish { objectWillChange.send() }
     }
 
     /// Naslaga na ćeliji (kamen, željezo) ili nil.
@@ -440,6 +482,7 @@ struct MapEditorSaveData: Codable {
     enum CodingKeys: String, CodingKey {
         case mapName, rows, cols, placements, cells, createdDate, originOffsetX, originOffsetZ
         case vertexHeights, vertexOffsets, lordStarts, undergroundPlacements, undergroundVertexHeights
+        case seaPolygons
     }
     /// Ime mape (obavezno pri spremanju).
     let mapName: String
@@ -464,12 +507,15 @@ struct MapEditorSaveData: Codable {
     let undergroundPlacements: [Placement]?
     /// Visine podzemlja (10 = 100 % popunjeno). Nil na starim mapama → pri učitavanju puni se na 10.
     let undergroundVertexHeights: [String: Double]?
+    /// Poligoni mora (editor linije). Nil = stare mape / samo ćelije.
+    let seaPolygons: [SeaPolygonShape]?
 
-    init(mapName: String, rows: Int, cols: Int, placements: [Placement], cells: [String: MapCell]? = nil, createdDate: Date? = nil, originOffsetX: Double? = 0, originOffsetZ: Double? = 0, vertexHeights: [String: Double]? = nil, vertexOffsets: [String: [Double]]? = nil, lordStarts: [String: MapCoordinate]? = nil, undergroundPlacements: [Placement]? = nil, undergroundVertexHeights: [String: Double]? = nil) {
+    init(mapName: String, rows: Int, cols: Int, placements: [Placement], cells: [String: MapCell]? = nil, createdDate: Date? = nil, originOffsetX: Double? = 0, originOffsetZ: Double? = 0, vertexHeights: [String: Double]? = nil, vertexOffsets: [String: [Double]]? = nil, lordStarts: [String: MapCoordinate]? = nil, undergroundPlacements: [Placement]? = nil, undergroundVertexHeights: [String: Double]? = nil, seaPolygons: [SeaPolygonShape]? = nil) {
         self.vertexOffsets = vertexOffsets
         self.lordStarts = lordStarts
         self.undergroundPlacements = undergroundPlacements
         self.undergroundVertexHeights = undergroundVertexHeights
+        self.seaPolygons = seaPolygons
         self.mapName = mapName
         self.rows = rows
         self.cols = cols
@@ -496,6 +542,7 @@ struct MapEditorSaveData: Codable {
         lordStarts = try c.decodeIfPresent([String: MapCoordinate].self, forKey: .lordStarts)
         undergroundPlacements = try c.decodeIfPresent([Placement].self, forKey: .undergroundPlacements)
         undergroundVertexHeights = try c.decodeIfPresent([String: Double].self, forKey: .undergroundVertexHeights)
+        seaPolygons = try c.decodeIfPresent([SeaPolygonShape].self, forKey: .seaPolygons)
     }
 
     static func encodeHeights(_ heights: [String: CGFloat]) -> [String: Double]? {

@@ -84,4 +84,6 @@ struct MapCameraSettings {
     var mapRotation: CGFloat = .pi
     /// Pomak kamere (mapa ostaje na mjestu, kamera se pomiče) – u pikselima.
     var panOffset: CGPoint = .zero
+    /// Space: true = kamera odozgo (nacrt), false = kosi orbit. Pan/zoom/rotacija ostaju.
+    var isTopDown: Bool = false
 }

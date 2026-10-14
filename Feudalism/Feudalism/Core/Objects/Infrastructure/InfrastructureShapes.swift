@@ -61,6 +61,25 @@ enum InfrastructureShapes {
         return root
     }
 
+    /// Kameno korito s vodom — pravilan kanal.
+    static func canal() -> SCNNode {
+        let root = named("canal")
+        k.box(to: root, 1.0 * s, 0.12 * s, 1.0 * s, k.stoneDark, at: SCNVector3(0, 0.06 * s, 0))
+        k.box(to: root, 0.14 * s, 0.28 * s, 1.0 * s, k.stone, at: SCNVector3(-0.43 * s, 0.20 * s, 0))
+        k.box(to: root, 0.14 * s, 0.28 * s, 1.0 * s, k.stone, at: SCNVector3(0.43 * s, 0.20 * s, 0))
+        k.box(to: root, 0.72 * s, 0.10 * s, 0.96 * s, k.water, at: SCNVector3(0, 0.12 * s, 0))
+        return root
+    }
+
+    /// Prirodniji vodeni pojas — rijeka.
+    static func river() -> SCNNode {
+        let root = named("river")
+        k.box(to: root, 1.0 * s, 0.08 * s, 1.0 * s, NSColor(red: 0.28, green: 0.36, blue: 0.22, alpha: 1), at: SCNVector3(0, 0.04 * s, 0))
+        k.box(to: root, 0.88 * s, 0.12 * s, 0.96 * s, k.water, at: SCNVector3(0, 0.10 * s, 0))
+        k.box(to: root, 0.55 * s, 0.04 * s, 0.96 * s, NSColor(red: 0.32, green: 0.55, blue: 0.78, alpha: 0.85), at: SCNVector3(0.08 * s, 0.16 * s, 0))
+        return root
+    }
+
     static func flag() -> SCNNode {
         let root = named("flag")
         k.cylinder(to: root, radius: 0.05 * s, height: 3.4 * s, color: k.timberDark, at: SCNVector3(0, 1.7 * s, 0), segments: 6)

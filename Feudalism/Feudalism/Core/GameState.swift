@@ -35,6 +35,18 @@ struct MarkedPerson: Identifiable, Equatable {
     let id: String
     let name: String
     let colorHex: String
+
+    /// Poseban id za kralja frakcije (`king:<factionId>`).
+    static func kingId(_ factionId: String) -> String { "king:\(factionId)" }
+
+    var isKing: Bool { id.hasPrefix("king:") }
+}
+
+/// Ciljna točka poteza označenih jedinica.
+struct MoveOrderMarker: Equatable {
+    var row: Int
+    var col: Int
+    var layer: MapLayer
 }
 
 /// Ulazni uređaj za upravljanje – u General postavkama; kasnije posebne funkcije za trackpad i miš.
@@ -220,6 +232,8 @@ final class GameState: ObservableObject {
     @Published var isMapEditorMode: Bool = false
     /// Solo graditelj: nema vojne/ekonomske pobjede. Građevine ostaju.
     @Published var isSandboxPlay: Bool = false
+    /// Solo graditelj: nil = igraš kao ti; inače id AI lorda (ime/boja).
+    @Published var sandboxPersonaLordId: String? = nil
     /// false dok se level (mapa, teren) ne učita; tek onda se prikaže igra (bez overlay-a).
     @Published var isLevelReady: Bool = false
 
@@ -297,6 +311,8 @@ final class GameState: ObservableObject {
     @Published var groundMark: GroundMark?
     /// Osobe unutar oznake. Prazno čim oznaka izgubi fokus.
     @Published var markedPeople: [MarkedPerson] = []
+    /// Točka na karti – cilj poteza označenih (kralj / vojska / specijalisti).
+    @Published var moveOrderMarker: MoveOrderMarker?
     /// Podzemni pogled: ista mapa, `Underground.depthMeters` ispod tla.
     @Published private(set) var isUndergroundView = false
     /// Ime objekta kroz koji se ušlo u podzemlje.
@@ -468,10 +484,22 @@ final class GameState: ObservableObject {
         }
     }
 
-    /// Kvadrat hvata samo vojsku. Seljak kod vatre i radnik u zgradi se ne označavaju.
+    /// Kvadrat hvata kralja, vojsku, rudare i inženjere. Seljak kod vatre i radnik se ne označavaju.
     func people(inside mark: GroundMark) -> [MarkedPerson] {
-        soldiers(inside: mark)
+        people(inside: mark, factionId: playerSeat?.id)
     }
+
+    func king(inside mark: GroundMark, seat: RealmSeat) -> Bool {
+        let minRow = Double(min(mark.originRow, mark.farRow)) - 0.5
+        let maxRow = Double(max(mark.originRow, mark.farRow)) + 0.5
+        let minCol = Double(min(mark.originCol, mark.farCol)) - 0.5
+        let maxCol = Double(max(mark.originCol, mark.farCol)) + 0.5
+        return seat.kingRow >= minRow && seat.kingRow <= maxRow
+            && seat.kingCol >= minCol && seat.kingCol <= maxCol
+    }
+
+    /// Privremeno označeni vojnici AI lordova (između mark_army i send_army).
+    var aiMarkedByFaction: [String: [MarkedPerson]] = [:]
     /// Grupe (savezi) – realmi s istim groupId dijele pobjedu.
     @Published var realmGroups: [RealmGroup] = []
     /// Realm kojim igrač upravlja (nil u solo ako nema „protivnika”).
@@ -541,8 +569,10 @@ final class GameState: ObservableObject {
         }
     }
 
-    /// Odabrani alat u panelu Alati: "sword", "mace", "report", "shovel", "pen". Nil = mač (zadano). Utječe na kursor i oznaku u panelu.
+    /// Odabrani alat u panelu Alati: "sword", "mace", "report", "shovel", "pen", "window". Nil = mač (zadano). Utječe na kursor i oznaku u panelu.
     @Published var selectedToolsPanelItem: String?
+    /// Brojač za Prozor alat: rast zatvara/otvara tekstualne mape ispočetka.
+    @Published var textMapWindowSession: Int = 0
 
     /// Nadzemna mapa – grid u 1×1 jedinicama (100×100, 200×200 ili 1000×1000).
     /// Nova nadzemna mapa dobiva podzemlje istih dimenzija, 100 % popunjeno (visina 10).
@@ -1522,6 +1552,7 @@ final class GameState: ObservableObject {
     /// Pokreni novu igru – skriva izbornik, prikazuje karticu. Resursi se u solo modu animiraju 0→100 kad se level učita.
     func startNewGame() {
         endMatchClock()
+        LivePartyLog.shared.clear()
         clearRealmSeats()
         isLevelReady = false
         isShowingMainMenu = false
@@ -1639,7 +1670,8 @@ final class GameState: ObservableObject {
     ) {
         isSandboxPlay = sandboxPlay
         matchPresentation = .graphics
-        setRealms([Realm(name: "Igrač", colorHex: "2E86AB", lordType: .human)])
+        let persona = sandboxPersonaIdentity()
+        setRealms([Realm(name: persona.name, colorHex: persona.colorHex, lordType: .human)])
         guard let root = MapStorage.mapsRoot() else { return }
         let fileURL = root.appendingPathComponent(entry.path)
         guard let data = MapFileManager.load(from: fileURL) else { return }
@@ -1653,6 +1685,16 @@ final class GameState: ObservableObject {
             (.food, initialFood), (.hop, initialHop), (.hay, initialHay)
         ])
         grantSandboxOpening()
+    }
+
+    /// Ime i boja frakcije u Solo graditelju (ti ili odabrani AI lord).
+    func sandboxPersonaIdentity() -> (name: String, colorHex: String) {
+        if let id = sandboxPersonaLordId,
+           let profile = AILordProfileStore.shared.profile(id: id) {
+            return (profile.localizedName(language: appLanguage), profile.displayColorHex)
+        }
+        let name = playerProfileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (name.isEmpty ? "Igrač" : name, "2E86AB")
     }
 
     /// Solo graditelj: kreni s već pripremljenom mapom (učitanom u izborniku).
@@ -1670,9 +1712,10 @@ final class GameState: ObservableObject {
     ) {
         isSandboxPlay = true
         matchPresentation = .graphics
+        let persona = sandboxPersonaIdentity()
         setRealms([Realm(
-            name: playerProfileName.isEmpty ? "Igrač" : playerProfileName,
-            colorHex: "2E86AB",
+            name: persona.name,
+            colorHex: persona.colorHex,
             lordType: .human
         )])
         gameMap = map
@@ -1864,7 +1907,8 @@ final class GameState: ObservableObject {
             vertexOffsets: MapEditorSaveData.encodeOffsets(gameMap.vertexOffsets),
             lordStarts: MapEditorSaveData.encodeLordStarts(gameMap.lordStarts),
             undergroundPlacements: savedUndergroundPlacements,
-            undergroundVertexHeights: savedUndergroundVertexHeights
+            undergroundVertexHeights: savedUndergroundVertexHeights,
+            seaPolygons: gameMap.seaPolygons.isEmpty ? nil : gameMap.seaPolygons
         )
         let (saved, saveError) = MapFileManager.save(data: data, to: url)
         guard saved else { return saveError ?? "Spremanje mape nije uspjelo." }
@@ -1928,6 +1972,7 @@ final class GameState: ObservableObject {
         newMap.replaceLordStarts(data.lordStartSlots)
         newMap.originOffsetX = CGFloat(data.originOffsetX ?? 0)
         newMap.originOffsetZ = CGFloat(data.originOffsetZ ?? 0)
+        if let polys = data.seaPolygons { newMap.setSeaPolygons(polys) }
         gameMap = newMap
         applyUndergroundLayer(from: data)
     }
@@ -2020,6 +2065,10 @@ extension GameState {
             objectWillChange.send()
             return
         }
+        if !isMapEditorMode {
+            let name = ObjectCatalog.shared.object(id: placement.objectId)?.name ?? placement.objectId
+            LivePartyLog.shared.noteDemolish(from: self, name: name, row: placement.row, col: placement.col)
+        }
         releaseWorker(of: id)
         (layer == .surface ? gameMap : undergroundMap).removePlacement(id: id)
         buildingStates[id] = nil
@@ -2027,7 +2076,10 @@ extension GameState {
         if placement.objectId == Carriage.objectId || transportLines[id] != nil { removeTransportLine(depotId: id) }
         warehouseLayouts[id] = nil
         if editingWarehouseRoute?.storeId == id { editingWarehouseRoute = nil }
-        if inspectedPlacementId == id { inspectedPlacementId = nil }
+        if inspectedPlacementId == id {
+            inspectedPlacementId = nil
+            inspectedBuildingTitle = nil
+        }
         placementsVersion += 1
         refreshBuildingAlerts()
         objectWillChange.send()
@@ -2184,6 +2236,24 @@ extension GameState {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: work)
     }
 
+    /// Postoji li već datoteka mape s tim imenom za trenutnu veličinu / slot.
+    func editorMapFileExists(named name: String, slot: MapEditorSlot? = nil) -> Bool {
+        let targetSlot = slot ?? mapEditorCurrentSlot ?? .solo
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let fileName = MapStorage.fileName(forMapName: trimmed, slotFallback: targetSlot)
+        guard let url = MapStorage.fileURL(rows: gameMap.rows, cols: gameMap.cols, fileName: fileName) else { return false }
+        return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    /// Ručno spremi mapu pod danim imenom (postavlja `mapEditorMapName`).
+    func saveEditorMap(named name: String, toSlot slot: MapEditorSlot? = nil) -> (success: Bool, errorMessage: String?) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return (false, "Unesite naziv mape.") }
+        mapEditorMapName = trimmed
+        return saveEditorMap(toSlot: slot)
+    }
+
     /// Spremi trenutnu mapu u slot (Maps/200x200/, …) preko MapFileManager. Sprema samo unutar projekta. Vraća (uspjeh, poruka greške za prikaz).
     func saveEditorMap(toSlot slot: MapEditorSlot? = nil) -> (success: Bool, errorMessage: String?) {
         let targetSlot = slot ?? mapEditorCurrentSlot ?? .solo
@@ -2209,7 +2279,8 @@ extension GameState {
             vertexOffsets: MapEditorSaveData.encodeOffsets(gameMap.vertexOffsets),
             lordStarts: MapEditorSaveData.encodeLordStarts(gameMap.lordStarts),
             undergroundPlacements: savedUndergroundPlacements,
-            undergroundVertexHeights: savedUndergroundVertexHeights
+            undergroundVertexHeights: savedUndergroundVertexHeights,
+            seaPolygons: gameMap.seaPolygons.isEmpty ? nil : gameMap.seaPolygons
         )
         guard let fileURL = MapStorage.fileURL(rows: gameMap.rows, cols: gameMap.cols, fileName: fileName) else {
             let side = gameMap.rows * MapScale.smallCellsPerObjectCubeSide
@@ -2274,6 +2345,7 @@ extension GameState {
         newMap.replaceLordStarts(data.lordStartSlots)
         newMap.originOffsetX = CGFloat(data.originOffsetX ?? 0)
         newMap.originOffsetZ = CGFloat(data.originOffsetZ ?? 0)
+        if let polys = data.seaPolygons { newMap.setSeaPolygons(polys) }
         gameMap = newMap
         applyUndergroundLayer(from: data)
     }
@@ -2413,7 +2485,7 @@ enum PadBrush: String, CaseIterable, Identifiable {
     case plodna = "Zelena zemlja"
     case kamen = "Kamena ruda"
     case zeljezo = "Željezna ruda"
-    case voda = "Voda"
+    case rijeka = "Rijeka"
     case more = "More"
     case pijesak = "Pijesak"
     case obicno = "Obično tlo"
@@ -2430,10 +2502,26 @@ enum PadBrush: String, CaseIterable, Identifiable {
 
     /// Podloge u panelu Vode.
     static var waterPads: [PadBrush] {
-        [.voda, .more, .mocvara, .jezero]
+        [.rijeka, .more, .mocvara, .jezero]
     }
 
     var isWater: Bool { Self.waterPads.contains(self) }
+
+    /// Linijski nacrt (točke, mid-split, krivulja, širina) — sve osim mora.
+    var usesWaterPathDraft: Bool {
+        self == .rijeka || self == .jezero || self == .mocvara
+    }
+
+    /// SF Symbol za kategoriju Vode.
+    var waterSystemImage: String? {
+        switch self {
+        case .rijeka: return "water.waves"
+        case .more: return "drop.fill"
+        case .mocvara: return "leaf.fill"
+        case .jezero: return "circle.bottomhalf.filled"
+        default: return nil
+        }
+    }
 }
 
 /// Naslaga koju četkica postavlja (ili briše).
@@ -2746,6 +2834,14 @@ extension GameState {
     /// Primijeni podlogu / površinu na cijeli označeni pravokutnik (npr. more).
     func paintPadRegion(row0: Int, col0: Int, row1: Int, col1: Int, pad: PadBrush) {
         guard canEditSurfaceTerrain else { return }
+        if pad == .more {
+            paintSeaSurfaceRegion(row0: row0, col0: col0, row1: row1, col1: col1)
+            return
+        }
+        if pad.usesWaterPathDraft {
+            beginRiverPathDraft(pad: pad, row0: row0, col0: col0, row1: row1, col1: col1)
+            return
+        }
         let coords = cellsInRectangle(row0: row0, col0: col0, row1: row1, col1: col1)
         guard !coords.isEmpty else { return }
         for coord in coords {
@@ -2754,6 +2850,197 @@ extension GameState {
         syncUndergroundWaterOccupation(at: coords)
         clearTerrainPaintPreview()
         bumpEditorCellsVersion()
+    }
+
+    /// Nova linija vode (rijeka / jezero / močvara) od (row0,col0) do (row1,col1).
+    func beginRiverPathDraft(pad: PadBrush, row0: Int, col0: Int, row1: Int, col1: Int) {
+        guard canEditSurfaceTerrain, pad.usesWaterPathDraft else { return }
+        var r0 = CGFloat(row0) + 0.5
+        var c0 = CGFloat(col0) + 0.5
+        var r1 = CGFloat(row1) + 0.5
+        var c1 = CGFloat(col1) + 0.5
+        if hypot(r1 - r0, c1 - c0) < 1.2 {
+            // Jedan klik / premali povlak — kratka linija (jezero/močvara malo šire).
+            r1 = r0
+            c1 = c0 + (pad == .rijeka ? 4 : 3)
+        }
+        var draft = RiverPathDraft.fromEndpoints(pad: pad, row0: r0, col0: c0, row1: r1, col1: c1)
+        draft.clamp()
+        mapEditorState?.riverPathDraft = draft
+        applyRiverPathDraft(publish: true)
+        clearTerrainPaintPreview()
+    }
+
+    func applyRiverPathDraft(publish: Bool = true) {
+        guard canEditSurfaceTerrain, var draft = mapEditorState?.riverPathDraft, let editor = mapEditorState else { return }
+        draft.clamp()
+        editor.riverPathDraft = draft
+        let surface = draft.paintedSurface
+        // Makni staro obojano područje ovog nacrta.
+        var touched: [MapCoordinate] = []
+        for coord in editor.riverPathPaintedCells {
+            if gameMap.cell(row: coord.row, col: coord.col)?.povrsina == surface {
+                gameMap.setSurface(at: coord, .tlo, publish: false)
+                touched.append(coord)
+            }
+        }
+        let center = draft.sampledCenterline()
+        guard !center.isEmpty else {
+            editor.riverPathPaintedCells = []
+            syncUndergroundWaterOccupation(at: touched)
+            if publish { bumpEditorCellsVersion() }
+            return
+        }
+        let padRadius = Int(ceil(draft.halfWidth)) + 1
+        let minR = max(0, Int(floor(center.map(\.row).min()!)) - padRadius)
+        let maxR = min(gameMap.rows - 1, Int(ceil(center.map(\.row).max()!)) + padRadius)
+        let minC = max(0, Int(floor(center.map(\.col).min()!)) - padRadius)
+        let maxC = min(gameMap.cols - 1, Int(ceil(center.map(\.col).max()!)) + padRadius)
+        var painted: Set<MapCoordinate> = []
+        for r in minR...maxR {
+            for c in minC...maxC {
+                let coord = MapCoordinate(row: r, col: c)
+                guard gameMap.isValid(coord) else { continue }
+                if draft.containsRiverCell(row: r, col: c) {
+                    painted.insert(coord)
+                    gameMap.setSurface(at: coord, surface, publish: false)
+                    gameMap.setDeposit(at: coord, nil)
+                    // Jezero: ista voda kao rijeka, ali prohodno. Močvara / rijeka: neprohodno.
+                    gameMap.setMovementIndex(at: coord, draft.paintedMovementIndex, publish: false)
+                    touched.append(coord)
+                }
+            }
+        }
+        editor.riverPathPaintedCells = painted
+        syncUndergroundWaterOccupation(at: touched)
+        if publish { bumpEditorCellsVersion() }
+    }
+
+    func setRiverPathCurve(_ curve: CGFloat) {
+        guard var draft = mapEditorState?.riverPathDraft else { return }
+        draft.curve = curve
+        draft.clamp()
+        mapEditorState?.riverPathDraft = draft
+        applyRiverPathDraft()
+    }
+
+    func setRiverPathWidth(_ halfWidth: CGFloat) {
+        guard var draft = mapEditorState?.riverPathDraft else { return }
+        draft.halfWidth = halfWidth
+        draft.clamp()
+        mapEditorState?.riverPathDraft = draft
+        applyRiverPathDraft()
+    }
+
+    func commitRiverPathDraft(_ draft: RiverPathDraft) {
+        guard canEditSurfaceTerrain else { return }
+        var d = draft
+        d.clamp()
+        mapEditorState?.riverPathDraft = d
+        applyRiverPathDraft(publish: true)
+    }
+
+    func finishRiverPathDraft() {
+        if mapEditorState?.riverPathDraft != nil {
+            applyRiverPathDraft(publish: true)
+        }
+        mapEditorState?.clearRiverPathDraft()
+        bumpEditorCellsVersion()
+        objectWillChange.send()
+    }
+
+    /// Površina mora: otvori nacrt (vanjski fiksni) i primijeni more / obalu.
+    func paintSeaSurfaceRegion(row0: Int, col0: Int, row1: Int, col1: Int) {
+        guard canEditSurfaceTerrain else { return }
+        let coords = cellsInRectangle(row0: row0, col0: col0, row1: row1, col1: col1)
+        guard !coords.isEmpty else { return }
+        let minR = coords.map(\.row).min()!
+        let maxR = coords.map(\.row).max()!
+        let minC = coords.map(\.col).min()!
+        let maxC = coords.map(\.col).max()!
+        var draft = SeaSurfaceDraft.fromOuterBounds(minRow: minR, maxRow: maxR, minCol: minC, maxCol: maxC)
+        draft.clampInnerInsideOuter()
+        mapEditorState?.seaSurfaceDraft = draft
+        applySeaSurfaceDraft(publish: true)
+        clearTerrainPaintPreview()
+    }
+
+    /// Rasporedi more prema nacrtu. Kopno uz more NE prima obalu/teksturu — ostaje kakvo je.
+    func applySeaSurfaceDraft(publish: Bool = true) {
+        guard canEditSurfaceTerrain, var draft = mapEditorState?.seaSurfaceDraft else { return }
+        draft.clampInnerInsideOuter()
+        mapEditorState?.seaSurfaceDraft = draft
+        var coords: [MapCoordinate] = []
+        for r in draft.outerMinRow...draft.outerMaxRow {
+            for c in draft.outerMinCol...draft.outerMaxCol {
+                let coord = MapCoordinate(row: r, col: c)
+                guard gameMap.isValid(coord) else { continue }
+                coords.append(coord)
+                if draft.containsSeaCell(row: r, col: c) {
+                    overwriteSurfaceAllowingSeaChange(at: coord, .more)
+                    gameMap.setDeposit(at: coord, nil)
+                } else if let surface = gameMap.cell(row: r, col: c)?.povrsina,
+                          surface == .more || surface == .obala {
+                    // Izvan plavog oblika: makni more/staru obalu, ne forsiraj plažu.
+                    overwriteSurfaceAllowingSeaChange(at: coord, .tlo)
+                    gameMap.setDeposit(at: coord, nil)
+                }
+            }
+        }
+        syncUndergroundWaterOccupation(at: coords)
+        if publish { bumpEditorCellsVersion() }
+    }
+
+    /// Nacrt iz postojećeg spojenog mora: vanjski = bbox mora + 1 ćelija obale.
+    func beginSeaSurfaceDraftFromEditingSea() {
+        guard canEditSurfaceTerrain, let editor = mapEditorState else { return }
+        let cells = editor.editingSeaCells
+        guard !cells.isEmpty else { return }
+        let minR = cells.map(\.row).min()!
+        let maxR = cells.map(\.row).max()!
+        let minC = cells.map(\.col).min()!
+        let maxC = cells.map(\.col).max()!
+        let oMinR = max(0, minR - 1)
+        let oMaxR = min(gameMap.rows - 1, maxR + 1)
+        let oMinC = max(0, minC - 1)
+        let oMaxC = min(gameMap.cols - 1, maxC + 1)
+        var draft = SeaSurfaceDraft.fromOuterBounds(
+            minRow: oMinR, maxRow: oMaxR, minCol: oMinC, maxCol: oMaxC
+        )
+        // Unutarnji kvadrat = rubovi bboxa mora (grid linije — ne središta ćelija).
+        draft.vertices = SeaSurfaceDraft.rectangleVertices(
+            iMinR: minR, iMaxR: maxR, iMinC: minC, iMaxC: maxC
+        )
+        draft.clampInnerInsideOuter()
+        editor.seaSurfaceDraft = draft
+        editor.exitSeaEditor()
+        applySeaSurfaceDraft(publish: true)
+    }
+
+    /// Commit live nacrta (iz SceneKit handle drag) u stanje + ćelije.
+    func commitSeaSurfaceDraft(_ draft: SeaSurfaceDraft) {
+        guard canEditSurfaceTerrain else { return }
+        var d = draft
+        d.clampInnerInsideOuter()
+        mapEditorState?.seaSurfaceDraft = d
+        applySeaSurfaceDraft(publish: true)
+    }
+
+    /// Gotovo: zaključaj more po linijama polygona + ćelije, rebuild → SeaBasin prati oblik.
+    func finishSeaSurfaceDraft() {
+        if let draft = mapEditorState?.seaSurfaceDraft {
+            applySeaSurfaceDraft(publish: true)
+            gameMap.upsertSeaPolygon(SeaPolygonShape(from: draft))
+        }
+        mapEditorState?.clearSeaSurfaceDraft()
+        // Još jedan bump da SceneKit skine nacrt-overlay i attach-a SeaBasin.
+        bumpEditorCellsVersion()
+        objectWillChange.send()
+    }
+
+    /// Dopusti zamjenu `.more` → druga površina (samo za uređivanje nacrta obale).
+    private func overwriteSurfaceAllowingSeaChange(at coordinate: MapCoordinate, _ surface: PovrsinaType) {
+        gameMap.setSurfaceAllowingSeaChange(at: coordinate, surface, publish: false)
     }
 
     func paintSurfaceRegion(row0: Int, col0: Int, row1: Int, col1: Int, surface: PovrsinaType) {
@@ -2780,9 +3067,15 @@ extension GameState {
         case .zeljezo:
             gameMap.setSurface(at: coord, .zeljezo, publish: publish)
             gameMap.setDeposit(at: coord, .iron)
-        case .voda, .jezero:
-            gameMap.setSurface(at: coord, .voda, publish: publish)
+        case .rijeka:
+            gameMap.setSurface(at: coord, .voda, publish: false)
             gameMap.setDeposit(at: coord, nil)
+            gameMap.setMovementIndex(at: coord, 0, publish: publish)
+        case .jezero:
+            // Isto kao voda vizualno, ali prohodno (za razliku od močvare).
+            gameMap.setSurface(at: coord, .voda, publish: false)
+            gameMap.setDeposit(at: coord, nil)
+            gameMap.setMovementIndex(at: coord, 1, publish: publish)
         case .more:
             gameMap.setSurface(at: coord, .more, publish: publish)
             gameMap.setDeposit(at: coord, nil)
@@ -2793,8 +3086,9 @@ extension GameState {
             gameMap.setSurface(at: coord, .tlo, publish: publish)
             gameMap.setDeposit(at: coord, nil)
         case .mocvara:
-            gameMap.setSurface(at: coord, .mocvara, publish: publish)
+            gameMap.setSurface(at: coord, .mocvara, publish: false)
             gameMap.setDeposit(at: coord, nil)
+            gameMap.setMovementIndex(at: coord, 0, publish: publish)
         case .obrisi:
             gameMap.setDeposit(at: coord, nil)
             if let surface = gameMap.cell(row: coord.row, col: coord.col)?.povrsina,
@@ -2802,6 +3096,36 @@ extension GameState {
                 gameMap.setSurface(at: coord, .tlo, publish: publish)
             }
         }
+    }
+
+    /// Četkica dubine mora na jednoj ćeliji / području.
+    func paintSeaDepth(centerRow: Int, centerCol: Int, brushOption: TerrainBrushOption, depth: CGFloat) {
+        guard canEditSurfaceTerrain else { return }
+        let r = brushOption.radius
+        var coords: [MapCoordinate] = []
+        for dr in -r...r {
+            for dc in -r...r {
+                let coord = MapCoordinate(row: centerRow + dr, col: centerCol + dc)
+                guard gameMap.isValid(coord) else { continue }
+                if !brushOption.isSquare, dr * dr + dc * dc > r * r { continue }
+                gameMap.setSeaDepth(at: coord, depth, publish: false)
+                coords.append(coord)
+            }
+        }
+        syncUndergroundWaterOccupation(at: coords)
+        bumpEditorCellsVersion()
+    }
+
+    func paintSeaDepthRegion(row0: Int, col0: Int, row1: Int, col1: Int, depth: CGFloat) {
+        guard canEditSurfaceTerrain else { return }
+        let coords = cellsInRectangle(row0: row0, col0: col0, row1: row1, col1: col1)
+        guard !coords.isEmpty else { return }
+        for coord in coords {
+            gameMap.setSeaDepth(at: coord, depth, publish: false)
+        }
+        syncUndergroundWaterOccupation(at: coords)
+        clearTerrainPaintPreview()
+        bumpEditorCellsVersion()
     }
 }
 

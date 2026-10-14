@@ -431,7 +431,24 @@ struct ContentView: View {
             topBar: { gameHUD },
             content: {
                 ZStack {
-                    SceneKitMapView(showGrid: showGrid, handPanMode: .constant(false), showPivotIndicator: showPivotIndicator)
+                    SceneKitMapView(
+                        showGrid: showGrid,
+                        handPanMode: .constant(false),
+                        showPivotIndicator: showPivotIndicator,
+                        isEraseMode: gameState.selectedToolsPanelItem == "mace",
+                        onRemoveAt: gameState.selectedToolsPanelItem == "mace"
+                            ? { row, col in
+                                let cell = MapCoordinate(row: row, col: col)
+                                guard let placement = gameState.activeMap.placement(at: cell) else { return }
+                                if !gameState.isSandboxPlay, !gameState.isOwnedByPlayer(placement) {
+                                    gameState.placementError = "Možeš srušiti samo svoje građevine."
+                                    return
+                                }
+                                gameState.demolishPlacement(id: placement.id)
+                                gameState.inspectedBuildingTitle = nil
+                            }
+                            : nil
+                    )
                         .id(gameState.mapSceneEpoch)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .ignoresSafeArea()
@@ -560,6 +577,15 @@ struct ContentView: View {
                     }
                     if gameState.showFPS {
                         performancePanelOverlay
+                    }
+                    if gameState.selectedToolsPanelItem == "window" {
+                        LiveTextMapPanel(
+                            session: gameState.textMapWindowSession,
+                            onCloseAll: { gameState.selectedToolsPanelItem = nil }
+                        )
+                        .environmentObject(gameState)
+                        .allowsHitTesting(true)
+                        .transition(.opacity)
                     }
                 }
             }

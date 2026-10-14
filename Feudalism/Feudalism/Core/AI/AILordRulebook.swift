@@ -103,12 +103,49 @@ struct AILordRulebook: Codable, Equatable {
     struct ActionRule: Codable, Equatable, Identifiable {
         let id: String
         let name: String
-        /// wait / build / train / workplace / economy / diplomacy
+        /// wait / build / train / workplace / economy / diplomacy / army / trade
         let kind: String
-        /// Građevina ili vojnik na kojeg se odnosi; prazno = opći potez.
+        /// Građevina, vojnik ili roba; prazno = opći potez.
         let target: String
         /// "military" / "economic" / prazno = obje kampanje.
         let campaign: String
+        /// Treba `row`/`col` u `AILordOrderedMove` (gradnja, rušenje, slanje…).
+        let needsCell: Bool
+        /// Treba pravokutnik (`row`/`col` + `farRow`/`farCol`) – npr. označi vojsku.
+        let needsRect: Bool
+
+        init(
+            id: String,
+            name: String,
+            kind: String,
+            target: String = "",
+            campaign: String = "",
+            needsCell: Bool = false,
+            needsRect: Bool = false
+        ) {
+            self.id = id
+            self.name = name
+            self.kind = kind
+            self.target = target
+            self.campaign = campaign
+            self.needsCell = needsCell
+            self.needsRect = needsRect
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case id, name, kind, target, campaign, needsCell, needsRect
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(String.self, forKey: .id)
+            name = try c.decode(String.self, forKey: .name)
+            kind = try c.decode(String.self, forKey: .kind)
+            target = try c.decodeIfPresent(String.self, forKey: .target) ?? ""
+            campaign = try c.decodeIfPresent(String.self, forKey: .campaign) ?? ""
+            needsCell = try c.decodeIfPresent(Bool.self, forKey: .needsCell) ?? false
+            needsRect = try c.decodeIfPresent(Bool.self, forKey: .needsRect) ?? false
+        }
     }
 
     struct WorkplaceRules: Codable, Equatable {
@@ -319,30 +356,83 @@ extension AILordRulebook {
                     kingDeathLoses: true
                 )
             },
-            actions: makeActions(buildings: buildings, soldiers: SoldierType.allCases)
+            actions: makeActions(
+                buildings: buildings,
+                goods: goods,
+                soldiers: SoldierType.allCases,
+                specialists: SpecialistType.allCases
+            )
         )
     }
 
-    private static func makeActions(buildings: [BuildingRule], soldiers: [SoldierType]) -> [ActionRule] {
-        func action(_ id: String, _ name: String, kind: String, target: String = "", campaign: String = "") -> ActionRule {
-            ActionRule(id: id, name: name, kind: kind, target: target, campaign: campaign)
+    private static func makeActions(
+        buildings: [BuildingRule],
+        goods: [GoodRule],
+        soldiers: [SoldierType],
+        specialists: [SpecialistType]
+    ) -> [ActionRule] {
+        func action(
+            _ id: String,
+            _ name: String,
+            kind: String,
+            target: String = "",
+            campaign: String = "",
+            needsCell: Bool = false,
+            needsRect: Bool = false
+        ) -> ActionRule {
+            ActionRule(
+                id: id,
+                name: name,
+                kind: kind,
+                target: target,
+                campaign: campaign,
+                needsCell: needsCell,
+                needsRect: needsRect
+            )
         }
         var list: [ActionRule] = [
             action("action:wait", "Čekaj", kind: "wait"),
             action("action:tax_up", "Digni porez", kind: "economy"),
             action("action:tax_down", "Spusti porez", kind: "economy"),
-            action("action:sleep", "Uspavaj građevinu", kind: "workplace"),
-            action("action:wake", "Probudi građevinu", kind: "workplace"),
-            action("action:demolish", "Sruši građevinu", kind: "workplace"),
+            action("action:sleep", "Uspavaj građevinu", kind: "workplace", needsCell: true),
+            action("action:wake", "Probudi građevinu", kind: "workplace", needsCell: true),
+            action("action:demolish", "Sruši građevinu", kind: "workplace", needsCell: true),
             action("action:deposit_gold", "Uplati zlato u riznicu", kind: "economy", campaign: "economic"),
             action("action:declare_war", "Objavi rat", kind: "diplomacy", campaign: "economic"),
             action("action:make_peace", "Sklopi mir", kind: "diplomacy", campaign: "economic"),
-            action("action:make_alliance", "Sklopi savez", kind: "diplomacy", campaign: "economic")
+            action("action:make_alliance", "Sklopi savez", kind: "diplomacy", campaign: "economic"),
+            action("action:mark_army", "Označi vojsku", kind: "army", campaign: "military", needsRect: true),
+            action("action:send_army", "Pošalji vojsku", kind: "army", campaign: "military", needsCell: true)
         ]
         for building in buildings where building.objectId != Castle.objectId {
-            list.append(action("action:build:\(building.objectId)", "Sagradi \(building.name)", kind: "build", target: building.objectId))
+            list.append(action(
+                "action:build:\(building.objectId)",
+                "Sagradi \(building.name)",
+                kind: "build",
+                target: building.objectId,
+                needsCell: true
+            ))
+        }
+        for good in goods where good.id != Good.gold.rawValue {
+            list.append(action(
+                "action:buy:\(good.id)",
+                "Kupi \(good.name)",
+                kind: "trade",
+                target: good.id,
+                campaign: "economic"
+            ))
+            list.append(action(
+                "action:sell:\(good.id)",
+                "Prodaj \(good.name)",
+                kind: "trade",
+                target: good.id,
+                campaign: "economic"
+            ))
         }
         for type in soldiers {
+            list.append(action("action:train:\(type.id)", "Obuči: \(type.displayName)", kind: "train", target: type.id))
+        }
+        for type in specialists {
             list.append(action("action:train:\(type.id)", "Obuči: \(type.displayName)", kind: "train", target: type.id))
         }
         return list

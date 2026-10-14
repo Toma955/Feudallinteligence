@@ -366,43 +366,221 @@ extension GameState {
         return nil
     }
 
+    /// Rudari / Inženjering najbliži vatri frakcije.
+    func specialistBuilding(_ type: SpecialistType, of faction: String) -> Placement? {
+        guard let seat = seat(of: faction) else { return nil }
+        let hearth = hearthCell(of: seat)
+        return mapLogic.allPlacements
+            .map(\.placement)
+            .filter { $0.objectId == type.buildingObjectId && !$0.isDestroyed && owner(of: $0) == faction }
+            .min { hypot(Double($0.row) - hearth.row, Double($0.col) - hearth.col) < hypot(Double($1.row) - hearth.row, Double($1.col) - hearth.col) }
+    }
+
+    /// Što fali za obuku specijalista; nil = može se obučiti.
+    func specialistTrainingProblem(_ type: SpecialistType, faction: String) -> String? {
+        if specialistBuilding(type, of: faction) == nil {
+            return type == .miner ? "Treba Rudari." : "Treba Inženjering."
+        }
+        let price = PriceList.specialistPrice(type)
+        if let lack = missing(for: price, faction: faction) { return "Nedostaje \(lack)." }
+        if freePeasants(of: faction) == 0 { return "Nema slobodnog seljaka." }
+        return nil
+    }
+
+    /// Slobodni seljak + zlato → rudar / inženjer. Pojavi se ispred građevine i vrati se vatri.
+    @discardableResult
+    func trainSpecialist(_ type: SpecialistType, faction: String? = nil) -> String? {
+        guard let seat = faction.flatMap({ seat(of: $0) }) ?? playerSeat else { return "Nema dvorca." }
+        if let problem = specialistTrainingProblem(type, faction: seat.id) { return problem }
+        guard let ground = specialistBuilding(type, of: seat.id),
+              let peasant = peopleOf(faction: seat.id).first(where: { $0.role == .peasant && $0.activity == .atFire })
+                ?? peopleOf(faction: seat.id).first(where: { $0.role == .peasant }) else {
+            return "Nema slobodnog seljaka."
+        }
+        pay(PriceList.specialistPrice(type), faction: seat.id)
+        let slot = freeSlot(faction: seat.id, soldiers: false)
+        let hearth = hearthCell(of: seat)
+        let exitRow = Double(ground.row + ground.height) + 0.5
+        let exitCol = Double(ground.col) + Double(ground.width) / 2 - 0.5
+        people.update(id: peasant.id) {
+            $0.role = .specialist
+            $0.specialistType = type
+            $0.soldierType = nil
+            $0.weapon = nil
+            $0.healthPercent = 100
+            $0.row = exitRow
+            $0.col = exitCol
+            $0.slot = slot
+            $0.activity = .returningToFire
+            $0.targetRow = hearth.row
+            $0.targetCol = hearth.col
+            $0.targetLayer = .surface
+        }
+        return nil
+    }
+
     /// Označeni vojnici unutar kvadrata. Seljak kod vatre i radnik se ne hvataju.
     func soldiers(inside mark: GroundMark) -> [MarkedPerson] {
+        people(inside: mark, factionId: playerSeat?.id)
+    }
+
+    /// Ljudi (vojska / specijalisti / kralj) frakcije unutar oznake.
+    func people(inside mark: GroundMark, factionId: String?) -> [MarkedPerson] {
+        guard let factionId else { return [] }
         let minRow = Double(min(mark.originRow, mark.farRow)) - 0.5
         let maxRow = Double(max(mark.originRow, mark.farRow)) + 0.5
         let minCol = Double(min(mark.originCol, mark.farCol)) - 0.5
         let maxCol = Double(max(mark.originCol, mark.farCol)) + 0.5
-        return people.people.compactMap { p in
-            let viewLayer: MapLayer = isUndergroundView ? .underground : .surface
-            guard p.canBeMarked, p.factionId == playerSeat?.id, p.layer == viewLayer,
-                  p.row >= minRow, p.row <= maxRow, p.col >= minCol, p.col <= maxCol else { return nil }
-            return MarkedPerson(id: p.id, name: p.displayName, colorHex: p.colorHex)
+        var marked: [MarkedPerson] = []
+        if let seat = seat(of: factionId), seat.kingAlive, king(inside: mark, seat: seat) {
+            marked.append(MarkedPerson(id: MarkedPerson.kingId(seat.id), name: "Kralj", colorHex: seat.colorHex))
         }
+        let viewLayer: MapLayer = isUndergroundView ? .underground : .surface
+        for p in people.people where p.canBeMarked && p.factionId == factionId && p.layer == viewLayer
+            && p.row >= minRow && p.row <= maxRow && p.col >= minCol && p.col <= maxCol {
+            marked.append(MarkedPerson(id: p.id, name: p.displayName, colorHex: p.colorHex))
+        }
+        return marked
     }
 
     // MARK: - Potez
 
-    /// Označeni vojnici idu na ćeliju. Ulaz na površini šalje ih u podzemlje.
+    /// Označeni (kralj / vojska / specijalisti) idu na cilj i stanu oko tog polja.
     func sendMarkedSoldiers(row: Int, col: Int, layer: MapLayer? = nil) {
+        let count = markedPeople.count
+        sendArmy(markedPeople, factionId: playerSeat?.id, row: row, col: col, layer: layer)
+        if !isMapEditorMode, count > 0 {
+            LivePartyLog.shared.noteArmy(
+                from: self,
+                action: "poslao \(count) jedinica",
+                row: row,
+                col: col
+            )
+        }
+    }
+
+    /// Pošalji danu skupinu jedinica frakcije na (row, col).
+    func sendArmy(
+        _ marked: [MarkedPerson],
+        factionId: String?,
+        row: Int,
+        col: Int,
+        layer: MapLayer? = nil
+    ) {
         let destLayer = layer ?? {
             if isUndergroundView { return .underground }
             if undergroundEntrance(row: row, col: col) != nil { return .underground }
             return .surface
         }()
-        let ids = markedPeople.compactMap { people.person(id: $0.id)?.canBeMarked == true ? $0.id : nil }
-        guard !ids.isEmpty else { return }
-        if destLayer == .underground, let faction = playerSeat?.id, !CandleRules.hasCandles(self, faction) {
-            placementError = "Hodnici rade samo sa svijećom (košnica → vosak → svijeća)."
+
+        enum Mover {
+            case king(String)
+            case person(String)
         }
-        for id in ids {
-            people.update(id: id) {
-                $0.activity = .soldierMoving
-                $0.targetRow = Double(row)
-                $0.targetCol = Double(col)
-                $0.targetLayer = destLayer
-                $0.pathTarget = nil
+        var movers: [Mover] = []
+        for person in marked {
+            if person.isKing {
+                movers.append(.king(factionId ?? playerSeat?.id ?? ""))
+            } else if people.person(id: person.id)?.canBeMarked == true {
+                movers.append(.person(person.id))
             }
         }
+        guard !movers.isEmpty else { return }
+
+        if destLayer == .underground, let faction = factionId ?? playerSeat?.id, !CandleRules.hasCandles(self, faction) {
+            placementError = "Hodnici rade samo sa svijećom (košnica → vosak → svijeća)."
+        }
+
+        if factionId == nil || factionId == playerSeat?.id {
+            moveOrderMarker = MoveOrderMarker(row: row, col: col, layer: destLayer)
+        }
+
+        let slots = gatherFormationSlots(count: movers.count, centerRow: row, centerCol: col)
+        for (index, mover) in movers.enumerated() {
+            let slot = slots[min(index, slots.count - 1)]
+            switch mover {
+            case .king(let fid):
+                let targetRow = Int(slot.row.rounded())
+                let targetCol = Int(slot.col.rounded())
+                if fid.isEmpty || fid == playerSeat?.id {
+                    movePlayerKing(toRow: targetRow, col: targetCol)
+                } else {
+                    moveKing(factionId: fid, toRow: targetRow, col: targetCol)
+                }
+            case .person(let id):
+                people.update(id: id) {
+                    $0.activity = .soldierMoving
+                    $0.targetRow = slot.row
+                    $0.targetCol = slot.col
+                    $0.targetLayer = destLayer
+                    $0.pathTarget = nil
+                }
+            }
+        }
+    }
+
+    /// Makni ciljnu točku kad nitko više ne ide prema njoj.
+    func clearMoveOrderMarkerIfSettled() {
+        guard moveOrderMarker != nil else { return }
+        let someoneMoving = markedPeople.contains { marked in
+            if marked.isKing {
+                guard let seat = playerSeat else { return false }
+                return abs(seat.kingRow - Double(seat.destinationRow)) > 0.15
+                    || abs(seat.kingCol - Double(seat.destinationCol)) > 0.15
+            }
+            guard let person = people.person(id: marked.id) else { return false }
+            if case .soldierMoving = person.activity { return true }
+            return false
+        }
+        if !someoneMoving {
+            moveOrderMarker = nil
+        }
+    }
+
+    /// Raspored oko ciljnog polja: prvo središte, zatim prstenovi (1 po ćeliji).
+    private func gatherFormationSlots(count: Int, centerRow: Int, centerCol: Int) -> [(row: Double, col: Double)] {
+        guard count > 0 else { return [] }
+        var slots: [(row: Double, col: Double)] = []
+        var radius = 0
+        while slots.count < count, radius <= 24 {
+            if radius == 0 {
+                if isGatherCellFree(row: centerRow, col: centerCol) {
+                    slots.append((Double(centerRow), Double(centerCol)))
+                }
+            } else {
+                for dr in -radius...radius {
+                    for dc in -radius...radius {
+                        guard max(abs(dr), abs(dc)) == radius else { continue }
+                        let r = centerRow + dr
+                        let c = centerCol + dc
+                        guard isGatherCellFree(row: r, col: c) else { continue }
+                        slots.append((Double(r), Double(c)))
+                        if slots.count >= count { break }
+                    }
+                    if slots.count >= count { break }
+                }
+            }
+            radius += 1
+        }
+        // Fallback: ako je sve blokirano, svi na cilj.
+        while slots.count < count {
+            slots.append((Double(centerRow), Double(centerCol)))
+        }
+        return slots
+    }
+
+    private func isGatherCellFree(row: Int, col: Int) -> Bool {
+        guard gameMap.isValid(MapCoordinate(row: row, col: col)),
+              let cell = gameMap.cell(row: row, col: col) else { return false }
+        switch cell.povrsina {
+        case .more, .voda, .mocvara: return false
+        default: break
+        }
+        if let placement = activeMap.placement(at: MapCoordinate(row: row, col: col)),
+           Passage.blocks(objectId: placement.objectId) {
+            return false
+        }
+        return true
     }
 
     func tickPeople() {
@@ -427,5 +605,6 @@ extension GameState {
         }
         tickPopulationFlow()
         refreshCastleEnclosure()
+        clearMoveOrderMarkerIfSettled()
     }
 }

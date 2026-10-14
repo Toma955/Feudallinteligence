@@ -34,10 +34,18 @@ struct MapCell: Identifiable, Codable {
     var canDigChannels: Bool = false
     /// Teren: pustinja, poluplodna, plodna, trava, voda, more, put, kamen, močvara.
     var povrsina: PovrsinaType = .default
+    /// Dubina mora u metrima (samo za `.more`). nil = zadanih 5 m.
+    var seaDepth: CGFloat? = nil
     /// Indeks kretanja: 1 = normalno, 0 = neprohodno. Zadano iz terena, može se ručno promijeniti.
     var movementIndex: Double = PovrsinaType.default.defaultMovementIndex
     /// Srednja točka ploče. nil = sredina ćelije, visina je prosjek kutova.
     var center: CellCenterPoint? = nil
+
+    /// Efektivna dubina mora (metri).
+    var effectiveSeaDepth: CGFloat {
+        guard povrsina == .more else { return 0 }
+        return UndergroundTerrain.clampSeaDepth(seaDepth ?? UndergroundTerrain.defaultSeaDepth)
+    }
 
     /// Kutovi ćelije u mreži (0 gornji lijevi, 1 gornji desni, 2 donji lijevi, 3 donji desni).
     var points: [MapCellPoint] {
@@ -73,10 +81,11 @@ struct MapCell: Identifiable, Codable {
         movementIndex = surface.defaultMovementIndex
         walkable = surface.isWalkable
         buildable = surface.isBuildable
+        if surface != .more { seaDepth = nil }
     }
 
     enum CodingKeys: String, CodingKey {
-        case coordinate, textureId, objectIds, terrain, height, resource, walkable, buildable, canAfforest, canDigChannels, povrsina, movementIndex, center
+        case coordinate, textureId, objectIds, terrain, height, resource, walkable, buildable, canAfforest, canDigChannels, povrsina, seaDepth, movementIndex, center
         case prohodnost
     }
 
@@ -94,6 +103,11 @@ struct MapCell: Identifiable, Codable {
         canAfforest = try c.decodeIfPresent(Bool.self, forKey: .canAfforest) ?? false
         canDigChannels = try c.decodeIfPresent(Bool.self, forKey: .canDigChannels) ?? false
         povrsina = try c.decodeIfPresent(PovrsinaType.self, forKey: .povrsina) ?? .default
+        if let d = try c.decodeIfPresent(Double.self, forKey: .seaDepth) {
+            seaDepth = UndergroundTerrain.clampSeaDepth(CGFloat(d))
+        } else {
+            seaDepth = nil
+        }
         if let index = try c.decodeIfPresent(Double.self, forKey: .movementIndex) {
             movementIndex = index
         } else if let legacy = try c.decodeIfPresent(String.self, forKey: .prohodnost) {
@@ -117,6 +131,9 @@ struct MapCell: Identifiable, Codable {
         try c.encode(canAfforest, forKey: .canAfforest)
         try c.encode(canDigChannels, forKey: .canDigChannels)
         try c.encode(povrsina, forKey: .povrsina)
+        if let seaDepth {
+            try c.encode(Double(seaDepth), forKey: .seaDepth)
+        }
         try c.encode(movementIndex, forKey: .movementIndex)
         try c.encodeIfPresent(center, forKey: .center)
     }

@@ -2,7 +2,7 @@
 //  PovrsinaType.swift
 //  Feudalism
 //
-//  Teren jedne ćelije, broj 0…7.
+//  Teren jedne ćelije, broj 0…8.
 //  Trava je tekstura na običnom tlu. Put nije površina.
 //
 
@@ -18,6 +18,8 @@ enum PovrsinaType: Int, Codable, CaseIterable, Identifiable {
     case more = 5
     case mocvara = 6
     case voda = 7
+    /// Plaža / obala između kopna i mora (prsten oko površine mora).
+    case obala = 8
 
     var id: Int { rawValue }
 
@@ -32,6 +34,7 @@ enum PovrsinaType: Int, Codable, CaseIterable, Identifiable {
         case .more: return "M"
         case .mocvara: return "B"
         case .voda: return "W"
+        case .obala: return "C"
         }
     }
 
@@ -45,24 +48,26 @@ enum PovrsinaType: Int, Codable, CaseIterable, Identifiable {
         case .more: return "More"
         case .mocvara: return "Močvara"
         case .voda: return "Voda"
+        case .obala: return "Obala"
         }
     }
 
     /// 1 = normalno, 0 = neprohodno.
+    /// Jezero se boja kao `.voda` pa se movementIndex naknadno postavi na > 0.
+    /// Močvara je neprohodna (jedina bitna razlika od jezera).
     var defaultMovementIndex: Double {
         switch self {
         case .tlo, .plodna: return 1
-        case .pustinja: return 0.8
+        case .pustinja, .obala: return 0.8
         case .kamen, .zeljezo: return 0.6
-        case .mocvara: return 0.4
-        case .voda, .more: return 0
+        case .mocvara, .voda, .more: return 0
         }
     }
 
     var isBuildable: Bool {
         switch self {
         case .voda, .more, .mocvara: return false
-        case .pustinja, .kamen, .zeljezo, .tlo, .plodna: return true
+        case .pustinja, .kamen, .zeljezo, .tlo, .plodna, .obala: return true
         }
     }
 
@@ -74,7 +79,7 @@ enum PovrsinaType: Int, Codable, CaseIterable, Identifiable {
         case .plodna: return 1
         case .tlo: return 0.6
         case .mocvara: return 0.3
-        case .pustinja: return 0.1
+        case .pustinja, .obala: return 0.1
         case .voda, .more, .kamen, .zeljezo: return 0
         }
     }
@@ -99,6 +104,7 @@ enum PovrsinaType: Int, Codable, CaseIterable, Identifiable {
         case "M": self = .more
         case "B": self = .mocvara
         case "W": self = .voda
+        case "C": self = .obala
         case "G", "T", "R", "P": self = .tlo
         default: self = .tlo
         }

@@ -152,9 +152,12 @@ struct MenuBrandIsland: View {
     var soloTitle: String? = nil
     var soloResourcesTitle: String = "Resursi"
     var soloImportTitle: String = "Uvezi mapu"
+    var soloPersonaTitle: String = "Osoba"
     var soloResourcesOn: Bool = false
+    var soloPersonaOn: Bool = false
     var onSoloResources: (() -> Void)? = nil
     var onSoloImport: (() -> Void)? = nil
+    var onSoloPersona: (() -> Void)? = nil
     /// Kad je postavljen, island piše About i otvara Informacije, Kako igrati i Elemente igre.
     var aboutTitle: String? = nil
     var aboutInfoTitle: String = "Informacije"
@@ -235,6 +238,9 @@ struct MenuBrandIsland: View {
                 }
                 soloActionButton(soloImportTitle, active: false, id: "solo_import_map") {
                     onSoloImport?()
+                }
+                soloActionButton(soloPersonaTitle, active: soloPersonaOn, id: "solo_section_osoba") {
+                    onSoloPersona?()
                 }
             }
         }

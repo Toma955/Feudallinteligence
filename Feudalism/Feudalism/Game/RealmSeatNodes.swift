@@ -8,7 +8,15 @@
 import SceneKit
 import AppKit
 
-func syncRealmSeats(on root: SCNNode, snapshots: [KingRenderSnapshot], rings: [String: PopulationRingSnapshot], rows: Int, cols: Int, gameMap: GameMap) {
+func syncRealmSeats(
+    on root: SCNNode,
+    snapshots: [KingRenderSnapshot],
+    rings: [String: PopulationRingSnapshot],
+    rows: Int,
+    cols: Int,
+    gameMap: GameMap,
+    markedKingFactionIds: Set<String> = []
+) {
     let live = Set(snapshots.map(\.factionId))
     for child in root.childNodes where child.name?.hasPrefix("seat-") == true {
         let id = String(child.name?.dropFirst(5) ?? "")
@@ -19,7 +27,14 @@ func syncRealmSeats(on root: SCNNode, snapshots: [KingRenderSnapshot], rings: [S
         placeCastle(in: node, snapshot: snap, rows: rows, cols: cols, gameMap: gameMap)
         let hearth = placeHearth(in: node, snapshot: snap, rows: rows, cols: cols, gameMap: gameMap)
         placePopulationRing(on: hearth, ring: rings[snap.factionId])
-        placeKing(in: node, snapshot: snap, rows: rows, cols: cols, gameMap: gameMap)
+        placeKing(
+            in: node,
+            snapshot: snap,
+            rows: rows,
+            cols: cols,
+            gameMap: gameMap,
+            marked: markedKingFactionIds.contains(snap.factionId)
+        )
     }
 }
 
@@ -73,7 +88,14 @@ private func placeHearth(in node: SCNNode, snapshot: KingRenderSnapshot, rows: I
     return hearth
 }
 
-private func placeKing(in node: SCNNode, snapshot: KingRenderSnapshot, rows: Int, cols: Int, gameMap: GameMap) {
+private func placeKing(
+    in node: SCNNode,
+    snapshot: KingRenderSnapshot,
+    rows: Int,
+    cols: Int,
+    gameMap: GameMap,
+    marked: Bool
+) {
     let king: SCNNode
     if let existing = node.childNode(withName: "king", recursively: false) {
         king = existing
@@ -96,7 +118,28 @@ private func placeKing(in node: SCNNode, snapshot: KingRenderSnapshot, rows: Int
         king.opacity = 0.45
         poseKing(king, moving: false, phase: 0)
     }
+    syncKingSelectionRing(on: king, marked: marked && snapshot.alive)
     placeHealthBar(in: node, at: pos, percent: snapshot.healthPercent, ground: ground)
+}
+
+private func syncKingSelectionRing(on king: SCNNode, marked: Bool) {
+    let existing = king.childNode(withName: "selectionRing", recursively: false)
+    if !marked {
+        existing?.removeFromParentNode()
+        return
+    }
+    if existing != nil { return }
+    let ring = SCNTorus(ringRadius: 0.48, pipeRadius: 0.05)
+    let mat = SCNMaterial()
+    mat.diffuse.contents = NSColor(red: 0.25, green: 0.9, blue: 0.4, alpha: 1)
+    mat.emission.contents = NSColor(red: 0.2, green: 0.75, blue: 0.35, alpha: 1)
+    mat.lightingModel = .constant
+    ring.materials = [mat]
+    let node = SCNNode(geometry: ring)
+    node.name = "selectionRing"
+    node.position = SCNVector3(0, 0.06, 0)
+    node.categoryBitMask = 1
+    king.addChildNode(node)
 }
 
 private func poseKing(_ king: SCNNode, moving: Bool, phase: Double) {

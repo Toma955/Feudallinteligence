@@ -13,6 +13,7 @@ struct CaveButtonExpandedView: View {
     private static let entries: [(asset: String, system: String, label: String, objectId: String)] = [
         ("cave", "arrow.down.to.line", "cave_entrance", UndergroundEntrance.objectId),
         ("cave", "rectangle.split.1x2", "cave_corridor", UndergroundCorridor.objectId),
+        ("cave", "sun.max.fill", "cave_light_opening", UndergroundLightOpening.objectId),
         ("pantry", "cabinet.fill", "food_smocnica", Smocnica.objectId),
         ("lager", "building.2.fill", "industry_lager", Lager.objectId),
     ]

@@ -200,7 +200,13 @@ final class RealmSeatRuntime {
 
     /// Klik na praznu kartu šalje kralja igrača na tu ćeliju.
     func movePlayerKing(toRow row: Int, col: Int, rows: Int, cols: Int) {
-        guard let i = seats.firstIndex(where: { $0.isPlayerFaction && $0.kingAlive }) else { return }
+        guard let seat = seats.first(where: { $0.isPlayerFaction && $0.kingAlive }) else { return }
+        moveKing(factionId: seat.id, toRow: row, col: col, rows: rows, cols: cols)
+    }
+
+    /// Pošalji kralja bilo koje frakcije na ćeliju (AI ili igrač).
+    func moveKing(factionId: String, toRow row: Int, col: Int, rows: Int, cols: Int) {
+        guard let i = seats.firstIndex(where: { $0.id == factionId && $0.kingAlive }) else { return }
         let targetRow = min(max(1, row), rows - 2)
         let targetCol = min(max(1, col), cols - 2)
         guard !cellBlocksPassage(targetRow, targetCol) else { return }
@@ -407,6 +413,17 @@ extension GameState {
     func movePlayerKing(toRow row: Int, col: Int) {
         guard !isGamePaused, !isMapEditorMode, isLevelReady else { return }
         realmSeats.movePlayerKing(toRow: row, col: col, rows: gameMap.rows, cols: gameMap.cols)
+    }
+
+    func moveKing(factionId: String, toRow row: Int, col: Int) {
+        guard !isGamePaused, !isMapEditorMode, isLevelReady else { return }
+        realmSeats.moveKing(
+            factionId: factionId,
+            toRow: row,
+            col: col,
+            rows: gameMap.rows,
+            cols: gameMap.cols
+        )
     }
 
     /// Kralj je mrtav: njegova grupa (ili sam realm) ispada iz igre.

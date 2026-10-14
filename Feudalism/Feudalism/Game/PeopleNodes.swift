@@ -57,7 +57,29 @@ func syncPeople(on root: SCNNode, snapshots: [PersonRenderSnapshot], rows: Int, 
         for i in 0..<4 {
             person.childNode(withName: "horseLeg\(i)", recursively: false)?.eulerAngles.x = (i == 0 || i == 3) ? leg * 0.8 : -leg * 0.8
         }
+        syncSelectionRing(on: person, marked: snap.marked)
     }
+}
+
+/// Zelena aureola ispod označene osobe (vojnik / rudar / inženjer).
+private func syncSelectionRing(on person: SCNNode, marked: Bool) {
+    let existing = person.childNode(withName: "selectionRing", recursively: false)
+    if !marked {
+        existing?.removeFromParentNode()
+        return
+    }
+    if existing != nil { return }
+    let ring = SCNTorus(ringRadius: 0.42, pipeRadius: 0.045)
+    let mat = SCNMaterial()
+    mat.diffuse.contents = NSColor(red: 0.25, green: 0.9, blue: 0.4, alpha: 1)
+    mat.emission.contents = NSColor(red: 0.2, green: 0.75, blue: 0.35, alpha: 1)
+    mat.lightingModel = .constant
+    ring.materials = [mat]
+    let node = SCNNode(geometry: ring)
+    node.name = "selectionRing"
+    node.position = SCNVector3(0, 0.06, 0)
+    node.categoryBitMask = 1
+    person.addChildNode(node)
 }
 
 func makeSoldierPreviewNode(type: SoldierType, colorHex: String = "#8B1E1E") -> SCNNode {
@@ -125,6 +147,7 @@ private func makeFigure(snapshot: PersonRenderSnapshot) -> SCNNode {
     case .peasant: tunic = linen
     case .worker: tunic = faction.blended(withFraction: 0.35, of: linen) ?? faction
     case .soldier: tunic = faction
+    case .specialist: tunic = NSColor(red: 0.42, green: 0.38, blue: 0.32, alpha: 1)
     }
 
     addPart(to: root, SCNBox(width: 0.34, height: 0.42, length: 0.18, chamferRadius: 0.04), tunic, at: SCNVector3(0, 1.08, 0))
@@ -142,6 +165,10 @@ private func makeFigure(snapshot: PersonRenderSnapshot) -> SCNNode {
     case .worker:
         addPart(to: root, SCNBox(width: 0.3, height: 0.36, length: 0.02, chamferRadius: 0.01), leather, at: SCNVector3(0, 1.0, 0.1))
         addPart(to: root, SCNSphere(radius: 0.135), NSColor(red: 0.3, green: 0.2, blue: 0.12, alpha: 1), at: SCNVector3(0, 1.5, -0.02), scale: SCNVector3(1, 0.5, 0.9))
+    case .specialist:
+        addPart(to: root, SCNBox(width: 0.28, height: 0.08, length: 0.22, chamferRadius: 0.01), leather, at: SCNVector3(0, 0.92, 0))
+        addPart(to: root, SCNBox(width: 0.06, height: 0.28, length: 0.06, chamferRadius: 0), iron, at: SCNVector3(0.28, 1.15, 0))
+        addPart(to: root, SCNSphere(radius: 0.13), NSColor(red: 0.28, green: 0.22, blue: 0.16, alpha: 1), at: SCNVector3(0, 1.52, 0), scale: SCNVector3(1, 0.55, 0.9))
     case .soldier:
         addPart(to: root, SCNSphere(radius: 0.145), iron, at: SCNVector3(0, 1.5, 0), scale: SCNVector3(1, 0.75, 1))
         addPart(to: root, SCNBox(width: 0.02, height: 0.1, length: 0.03, chamferRadius: 0), iron, at: SCNVector3(0, 1.43, 0.135))

@@ -3,11 +3,11 @@
 //  Feudalism
 //
 //  More: šuplje korito (UndergroundTerrain.filledHeight) + zidovi/dno/voda.
-//  Zasada ISKLJUČENO u SceneKitMapView — u editoru se crta samo površina (.more tint).
-//  wall  = okomite strane koje gledaju UNUTAR prema moru (Rock035 u map/sea/wall/)
-//  coast = zasada ISKLJUČENA (ne zauzima susjedne ćelije; kasnije Ground095A)
+//  Attach nakon „Gotovo” u editoru mora (SceneKitMapView).
+//  wall  = okomite strane prema unutra (Rock035 u map/sea/wall/)
+//  coast = kasnije Ground095A
 //  bottom = zasada ista tekstura kao wall; kasnije map/sea/bottom/
-//  water = Metal površina (RiverWaterShader.seaProgram) — kasnije iz editora mora
+//  water = Metal površina (RiverWaterShader.seaProgram) s animacijom valova
 //
 
 import SceneKit
@@ -216,19 +216,6 @@ enum SeaBasin {
         gameMap.cell(row: row, col: col)?.povrsina == .more
     }
 
-    /// Kopnena ćelija uz more — gornja ploča dobiva coast teksturu.
-    static func isShore(_ gameMap: GameMap, row: Int, col: Int) -> Bool {
-        guard gameMap.isValid(MapCoordinate(row: row, col: col)),
-              gameMap.cell(row: row, col: col)?.povrsina != .more else { return false }
-        for (dr, dc) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
-            let nr = row + dr, nc = col + dc
-            if gameMap.isValid(MapCoordinate(row: nr, col: nc)), isSea(gameMap, row: nr, col: nc) {
-                return true
-            }
-        }
-        return false
-    }
-
     /// Gušće ponavljanje → više detalja iz iste Rock035 mape.
     private static let textureMetersPerRepeat: CGFloat = 3.2
     /// Blagi UV rot da se uzorak ne poravna s mrežom ćelija.
@@ -393,32 +380,97 @@ enum SeaBasin {
             }
         }
 
-        var anySea = false
-        for r in 0..<rows {
-            for c in 0..<cols {
-                guard isSea(gameMap, row: r, col: c) else { continue }
-                anySea = true
-                let x0 = -halfW + CGFloat(c) * step
-                let x1 = -halfW + CGFloat(c + 1) * step
-                let z0 = -halfH + CGFloat(r) * step
-                let z1 = -halfH + CGFloat(r + 1) * step
-                addFloorCell(x0: x0, x1: x1, z0: z0, z1: z1)
-                addWaterCell(x0: x0, x1: x1, z0: z0, z1: z1)
+        /// World XZ iz ćelijskih grid-linija (isti prostor kao editor linije).
+        func worldXZ(row: CGFloat, col: CGFloat) -> (x: CGFloat, z: CGFloat) {
+            (-halfW + col * step, -halfH + row * step)
+        }
 
-                // Zid samo na rubu prema kopnu (između dva mora nema zida). inward = prema moru.
-                // SceneKit: y = -mapZ.
-                if !(gameMap.isValid(MapCoordinate(row: r - 1, col: c)) && isSea(gameMap, row: r - 1, col: c)) {
-                    // Rub na z0: more je +z → inward u scene y = -1
-                    addInwardWall(x0: x0, y0: -z0, x1: x1, y1: -z0, inwardX: 0, inwardY: -1)
+        /// More iz polygona editora — prati linije, ne kocke ćelija.
+        func addPolygonBasin(_ shape: SeaPolygonShape) {
+            let verts = shape.vertices
+            guard verts.count >= 3 else { return }
+            var pts: [(x: CGFloat, z: CGFloat)] = verts.map { worldXZ(row: $0.row, col: $0.col) }
+            var cx: CGFloat = 0, cz: CGFloat = 0
+            for p in pts { cx += p.x; cz += p.z }
+            let inv = 1 / CGFloat(pts.count)
+            cx *= inv; cz *= inv
+
+            // Voda + dno: fan od središta; rubovi podijeljeni za Metal valove.
+            let edgeSubdiv = max(waterSubdiv, 4)
+            var ring: [(x: CGFloat, z: CGFloat)] = []
+            for i in 0..<pts.count {
+                let a = pts[i]
+                let b = pts[(i + 1) % pts.count]
+                for s in 0..<edgeSubdiv {
+                    let t = CGFloat(s) / CGFloat(edgeSubdiv)
+                    ring.append((a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t))
                 }
-                if !(gameMap.isValid(MapCoordinate(row: r + 1, col: c)) && isSea(gameMap, row: r + 1, col: c)) {
-                    addInwardWall(x0: x1, y0: -z1, x1: x0, y1: -z1, inwardX: 0, inwardY: 1)
-                }
-                if !(gameMap.isValid(MapCoordinate(row: r, col: c - 1)) && isSea(gameMap, row: r, col: c - 1)) {
-                    addInwardWall(x0: x0, y0: -z0, x1: x0, y1: -z1, inwardX: 1, inwardY: 0)
-                }
-                if !(gameMap.isValid(MapCoordinate(row: r, col: c + 1)) && isSea(gameMap, row: r, col: c + 1)) {
-                    addInwardWall(x0: x1, y0: -z1, x1: x1, y1: -z0, inwardX: -1, inwardY: 0)
+            }
+            let centerW = waterVertex(x: cx, z: cz)
+            let centerF = floorVertex(x: cx, z: cz)
+            var ringW: [Int32] = []
+            var ringF: [Int32] = []
+            ringW.reserveCapacity(ring.count)
+            ringF.reserveCapacity(ring.count)
+            for p in ring {
+                ringW.append(waterVertex(x: p.x, z: p.z))
+                ringF.append(floorVertex(x: p.x, z: p.z))
+            }
+            for i in 0..<ring.count {
+                let j = (i + 1) % ring.count
+                waterIdx.append(contentsOf: [centerW, ringW[i], ringW[j]])
+                floorIdx.append(contentsOf: [centerF, ringF[j], ringF[i]])
+            }
+
+            // Zidovi duž editor linija (CW poligon → inward = rotacija 90° CCW u XZ).
+            for i in 0..<pts.count {
+                let a = pts[i]
+                let b = pts[(i + 1) % pts.count]
+                let dx = b.x - a.x
+                let dz = b.z - a.z
+                let len = hypot(dx, dz)
+                guard len > 0.01 else { continue }
+                let inx = -dz / len
+                let inz = dx / len
+                // SceneKit: y = -mapZ → inwardY = -inz
+                addInwardWall(
+                    x0: a.x, y0: -a.z,
+                    x1: b.x, y1: -b.z,
+                    inwardX: inx, inwardY: -inz
+                )
+            }
+        }
+
+        var anySea = false
+        if !gameMap.seaPolygons.isEmpty {
+            for shape in gameMap.seaPolygons where shape.vertices.count >= 3 {
+                anySea = true
+                addPolygonBasin(shape)
+            }
+        } else {
+            // Fallback: stare mape bez polygona — kocke po ćelijama.
+            for r in 0..<rows {
+                for c in 0..<cols {
+                    guard isSea(gameMap, row: r, col: c) else { continue }
+                    anySea = true
+                    let x0 = -halfW + CGFloat(c) * step
+                    let x1 = -halfW + CGFloat(c + 1) * step
+                    let z0 = -halfH + CGFloat(r) * step
+                    let z1 = -halfH + CGFloat(r + 1) * step
+                    addFloorCell(x0: x0, x1: x1, z0: z0, z1: z1)
+                    addWaterCell(x0: x0, x1: x1, z0: z0, z1: z1)
+                    if !(gameMap.isValid(MapCoordinate(row: r - 1, col: c)) && isSea(gameMap, row: r - 1, col: c)) {
+                        addInwardWall(x0: x0, y0: -z0, x1: x1, y1: -z0, inwardX: 0, inwardY: -1)
+                    }
+                    if !(gameMap.isValid(MapCoordinate(row: r + 1, col: c)) && isSea(gameMap, row: r + 1, col: c)) {
+                        addInwardWall(x0: x1, y0: -z1, x1: x0, y1: -z1, inwardX: 0, inwardY: 1)
+                    }
+                    if !(gameMap.isValid(MapCoordinate(row: r, col: c - 1)) && isSea(gameMap, row: r, col: c - 1)) {
+                        addInwardWall(x0: x0, y0: -z0, x1: x0, y1: -z1, inwardX: 1, inwardY: 0)
+                    }
+                    if !(gameMap.isValid(MapCoordinate(row: r, col: c + 1)) && isSea(gameMap, row: r, col: c + 1)) {
+                        addInwardWall(x0: x1, y0: -z1, x1: x1, y1: -z0, inwardX: -1, inwardY: 0)
+                    }
                 }
             }
         }

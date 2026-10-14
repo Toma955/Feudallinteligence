@@ -90,6 +90,10 @@ struct MapEditorView: View {
     @State private var eraseMode = false
     @State private var saveLoadMessage: String?
     @State private var showSaveLoadAlert = false
+    @State private var showSaveNameDialog = false
+    @State private var saveNameDraft = ""
+    @State private var showOverwriteConfirm = false
+    @State private var pendingOverwriteName: String?
     @State private var expandedItem: EditorBarItem?
     @State private var selectedLordSlot: Int = 1
     @State private var terrainToolOption: TerrainToolOption = .raise5
@@ -100,13 +104,23 @@ struct MapEditorView: View {
     @State private var depositBrush: DepositBrush = .kamen
     @State private var buildableBrush = false
     @State private var movementBrush: Double = 1
+    /// Odabrana vodena podloga (Rijeka/More/…) — njezin podizbornik s Nazad.
+    @State private var waterSubmenu: PadBrush?
+    /// Alat u podizborniku Mora: površina ili dubina.
+    @State private var seaTool: SeaEditorTool = .povrsina
+    /// Dubina (m) koju četkica Dubina postavlja.
+    @State private var seaDepthPreset: SeaDepthPreset = .m5
 
     private var isTerrainActive: Bool { expandedItem == .tool(.teren) }
     private var isWaterActive: Bool { expandedItem == .tool(.vode) }
+    /// Slikanje vode tek kad je otvoren podizbornik jedne od 4 ikone.
+    private var isWaterPaintActive: Bool { isWaterActive && waterSubmenu != nil }
     /// Teren ili Vode: klik-drag slikanje na mapi.
-    private var isSurfacePaintActive: Bool { isTerrainActive || isWaterActive }
+    private var isSurfacePaintActive: Bool { isTerrainActive || isWaterPaintActive }
     private var isAILordsActive: Bool { expandedItem == .aiLords }
     private var isSeaEditorActive: Bool { gameState.mapEditorState?.isSeaEditorActive == true }
+    private var isSeaSurfaceDraftActive: Bool { gameState.mapEditorState?.isSeaSurfaceDraftActive == true }
+    private var isRiverPathDraftActive: Bool { gameState.mapEditorState?.isRiverPathDraftActive == true }
 
     var body: some View {
         MapScreenLayout(
@@ -119,7 +133,7 @@ struct MapEditorView: View {
                     handPanMode: $handPanMode,
                     isEraseMode: eraseMode,
                     onRemoveAt: eraseMode ? { gameState.removePlacement(at: MapCoordinate(row: $0, col: $1)) } : nil,
-                    isTerrainEditMode: isSurfacePaintActive,
+                    isTerrainEditMode: isSurfacePaintActive && !isSeaSurfaceDraftActive && !isRiverPathDraftActive,
                     terrainTool: isTerrainActive ? terrainToolOption : nil,
                     terrainBrushOption: isSurfacePaintActive ? terrainBrushOption : nil,
                     onTerrainEdit: nil,
@@ -133,13 +147,21 @@ struct MapEditorView: View {
                     onTerrainPaintCommit: isSurfacePaintActive ? { r0, c0, r1, c1 in
                         applyTerrainPaintRegion(row0: r0, col0: c0, row1: r1, col1: c1)
                     } : nil,
-                    terrainPaintSeaPreview: (isWaterActive && padBrush == .more)
+                    terrainPaintSeaPreview: (isWaterPaintActive && padBrush == .more)
                         || (isTerrainActive && paintMode == .podloge && padBrush == .more),
                     onCellSelectionToggle: nil,
                     isCellSelectionMode: false,
                     onVertexDotSelected: nil,
-                    onExitTerrainEditMode: isSurfacePaintActive ? { withAnimation(.easeInOut(duration: 0.28)) { expandedItem = nil } } : nil,
-                    editorOverlayMode: isWaterActive ? .podloge : (isTerrainActive ? paintMode : nil),
+                    onExitTerrainEditMode: isSurfacePaintActive ? {
+                        withAnimation(.easeInOut(duration: 0.28)) {
+                            if isWaterPaintActive {
+                                waterSubmenu = nil
+                            } else {
+                                expandedItem = nil
+                            }
+                        }
+                    } : nil,
+                    editorOverlayMode: isWaterPaintActive ? .podloge : (isTerrainActive ? paintMode : nil),
                     selectedLordStartSlot: isAILordsActive ? selectedLordSlot : nil,
                     onMapEditorCellTap: { r, c in
                         handleMapEditorCellTap(row: r, col: c)
@@ -166,7 +188,7 @@ struct MapEditorView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .allowsHitTesting(false)
 
-                    // Editor mora: Nazad + Površina mora. Inače donji bar kategorija.
+                    // Editor mora privremeno zamjenjuje bar; nacrt oblika ostaje u originalnom islandu (+ Gotovo).
                     Group {
                         if isSeaEditorActive {
                             seaEditorBar
@@ -189,10 +211,22 @@ struct MapEditorView: View {
             if item?.placesObjects == true { eraseMode = false } else { gameState.selectedPlacementObjectId = nil }
             if item == .tool(.vode) {
                 paintMode = .podloge
-                if !padBrush.isWater { padBrush = .voda }
+                waterSubmenu = nil
                 if isSeaEditorActive { gameState.exitSeaEditor() }
-            } else if item == .tool(.teren), padBrush.isWater {
-                padBrush = .plodna
+                // Ne briši aktivni nacrt — korisnik uređuje unutarnju crtu.
+                enterTopDownForWaterTools()
+            } else if item == .tool(.teren) {
+                waterSubmenu = nil
+                if isSeaSurfaceDraftActive { gameState.finishSeaSurfaceDraft() }
+                if isRiverPathDraftActive { gameState.finishRiverPathDraft() }
+                if padBrush.isWater { padBrush = .plodna }
+                // Zemlja: kosa kamera, samo površina (bez dubine).
+                paintMode = .podloge
+                enterTiltedCameraForLandTools()
+            } else {
+                waterSubmenu = nil
+                if isSeaSurfaceDraftActive { gameState.finishSeaSurfaceDraft() }
+                if isRiverPathDraftActive { gameState.finishRiverPathDraft() }
             }
         }
         .alert("Uređivač mape", isPresented: $showSaveLoadAlert) {
@@ -200,6 +234,62 @@ struct MapEditorView: View {
         } message: {
             if let msg = saveLoadMessage { Text(msg) }
         }
+        .alert("Spremi mapu", isPresented: $showSaveNameDialog) {
+            TextField("Naziv mape", text: $saveNameDraft)
+            Button("Odustani", role: .cancel) {
+                showSaveNameDialog = false
+            }
+            Button("Spremi") {
+                attemptSaveWithName(saveNameDraft, allowOverwrite: false)
+            }
+        } message: {
+            Text("Unesite ime pod kojim želite spremiti mapu.")
+        }
+        .alert("Prebrisati mapu?", isPresented: $showOverwriteConfirm) {
+            Button("Odustani", role: .cancel) {
+                pendingOverwriteName = nil
+            }
+            Button("Prebriši", role: .destructive) {
+                if let name = pendingOverwriteName {
+                    attemptSaveWithName(name, allowOverwrite: true)
+                }
+                pendingOverwriteName = nil
+            }
+        } message: {
+            if let name = pendingOverwriteName {
+                Text("Mapa „\(name)” već postoji. Želite li prebrisati datoteku?")
+            }
+        }
+    }
+
+    /// Spremi s dijalogom imena; ako ime već postoji (druga datoteka) — pitaj za prebrisivanje.
+    private func attemptSaveWithName(_ rawName: String, allowOverwrite: Bool) {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            saveLoadMessage = "Unesite naziv mape."
+            showSaveLoadAlert = true
+            return
+        }
+        let slot = gameState.mapEditorCurrentSlot ?? .solo
+        let newFile = MapStorage.fileName(forMapName: name, slotFallback: slot)
+        let currentFile = MapStorage.fileName(
+            forMapName: gameState.mapEditorMapName,
+            slotFallback: slot
+        )
+        let exists = gameState.editorMapFileExists(named: name, slot: slot)
+        let isSameFile = newFile == currentFile
+        if exists, !allowOverwrite, !isSameFile {
+            pendingOverwriteName = name
+            showOverwriteConfirm = true
+            return
+        }
+        let result = gameState.saveEditorMap(named: name)
+        if result.success {
+            saveLoadMessage = "Mapa „\(name)” je spremljena."
+        } else {
+            saveLoadMessage = result.errorMessage ?? "Spremanje nije uspjelo."
+        }
+        showSaveLoadAlert = true
     }
 
     /// Klik na mapu kad nije paint/place: otvori editor mora ako je ćelija more.
@@ -215,15 +305,23 @@ struct MapEditorView: View {
     /// Klik na mapu u kategoriji Teren ili Vode: primijeni odabrani način rada na četkicu.
     private func applyTerrainBrush(row: Int, col: Int) {
         gameState.clearTerrainPaintPreview()
-        // Klik na postojeće more (alat More) → editor te spojene površine, ne ponovno slikanje.
-        if isWaterActive, padBrush == .more,
-           gameState.gameMap.cell(row: row, col: col)?.povrsina == .more {
-            expandedItem = nil
-            _ = gameState.enterSeaEditor(at: row, col: col)
-            return
-        }
-        if isWaterActive {
-            gameState.paintPad(centerRow: row, centerCol: col, brushOption: terrainBrushOption, pad: padBrush)
+        if isWaterPaintActive {
+            if padBrush == .more, seaTool == .dubina {
+                gameState.paintSeaDepth(
+                    centerRow: row, centerCol: col,
+                    brushOption: terrainBrushOption,
+                    depth: seaDepthPreset.rawValue
+                )
+            } else if padBrush == .more, seaTool == .povrsina {
+                // Četkica: mali kvadrat → more + obala ako stane.
+                let r = terrainBrushOption.radius
+                gameState.paintSeaSurfaceRegion(
+                    row0: row - r, col0: col - r,
+                    row1: row + r, col1: col + r
+                )
+            } else {
+                gameState.paintPad(centerRow: row, centerCol: col, brushOption: terrainBrushOption, pad: padBrush)
+            }
             return
         }
         switch paintMode {
@@ -247,8 +345,15 @@ struct MapEditorView: View {
 
     /// Click-drag pravokutnik: označi područje pa primijeni (npr. more na cijeli blok).
     private func applyTerrainPaintRegion(row0: Int, col0: Int, row1: Int, col1: Int) {
-        if isWaterActive {
-            gameState.paintPadRegion(row0: row0, col0: col0, row1: row1, col1: col1, pad: padBrush)
+        if isWaterPaintActive {
+            if padBrush == .more, seaTool == .dubina {
+                gameState.paintSeaDepthRegion(
+                    row0: row0, col0: col0, row1: row1, col1: col1,
+                    depth: seaDepthPreset.rawValue
+                )
+            } else {
+                gameState.paintPadRegion(row0: row0, col0: col0, row1: row1, col1: col1, pad: padBrush)
+            }
             return
         }
         switch paintMode {
@@ -293,30 +398,26 @@ struct MapEditorView: View {
         .buttonStyle(.plain)
     }
 
-    /// Panel za teren: visina, teren, podloge, naslage, gradnja, kretanje, precizno.
-    /// Sve se mijenja samo na gornjoj mapi; podzemlje se ne podiže ni ne spušta.
+    /// Panel za teren: podloge (glavno) + visina / ostalo. Bez dubine — samo površina.
     private var terrainToolPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
-                ForEach(MapEditorPaintMode.allCases) { mode in
-                    pill(mode.rawValue, selected: paintMode == mode) { paintMode = mode }
+                ForEach(MapEditorPaintMode.allCases.filter { $0 != .teren }) { mode in
+                    pill(mode.rawValue, selected: paintMode == mode) {
+                        paintMode = mode
+                        if mode == .podloge { enterTiltedCameraForLandTools() }
+                    }
                 }
             }
             switch paintMode {
             case .visina:
                 heightToolRows
             case .teren:
-                HStack(spacing: 6) {
-                    ForEach(PovrsinaType.allCases) { surface in
-                        pill(surface.displayName, selected: surfaceBrush == surface) { surfaceBrush = surface }
-                    }
-                }
+                EmptyView()
             case .podloge:
-                HStack(spacing: 8) {
-                    ForEach(PadBrush.landPads) { pad in
-                        padSwatch(pad, selected: padBrush == pad)
-                    }
-                    Text("Trava je samo tekstura. Zeleno = farme, sivo = kamen, crveno-sivo = željezo. Vode su u kategoriji Vode.")
+                VStack(alignment: .leading, spacing: 6) {
+                    landPadsIconRow
+                    Text("Stavi površinu (klik / povuci). Teren nema dubinu — vode su u Vode.")
                         .font(.system(size: 11))
                         .foregroundStyle(.white.opacity(0.7))
                 }
@@ -430,50 +531,323 @@ struct MapEditorView: View {
                             .frame(width: 1, height: 28)
                     }
                 }
-                Rectangle()
-                    .fill(.white.opacity(0.45))
-                    .frame(width: 1, height: 36)
-                    .padding(.horizontal, 6)
-                ForEach(PadBrush.landPads) { pad in
-                    padSwatch(pad, selected: paintMode == .podloge && padBrush == pad)
-                }
             }
         }
     }
 
-    /// Panel za vode: voda, more, močvara, jezero (+ veličina četkice u gornjoj traci).
+    /// Ikone zemaljskih podloga (ista šema kao Vode — odaberi pa stavi na mapu).
+    private var landPadsIconRow: some View {
+        let icon = CGFloat(gameState.bottomBarIconScale)
+        let buttonSize: CGFloat = 40 * icon
+        return HStack(spacing: 0) {
+            ForEach(PadBrush.landPads) { pad in
+                Button {
+                    paintMode = .podloge
+                    padBrush = pad
+                    enterTiltedCameraForLandTools()
+                } label: {
+                    VStack(spacing: 4) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.white.opacity(paintMode == .podloge && padBrush == pad ? 0.22 : 0.12))
+                            padPreview(pad)
+                                .clipShape(Circle())
+                                .padding(7)
+                        }
+                        .frame(width: buttonSize, height: buttonSize)
+                        .overlay(
+                            Circle()
+                                .strokeBorder(
+                                    paintMode == .podloge && padBrush == pad ? Color.yellow.opacity(0.75) : Color.clear,
+                                    lineWidth: 1.5
+                                )
+                        )
+                        Text(pad.rawValue)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(paintMode == .podloge && padBrush == pad ? .yellow : .white.opacity(0.88))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .help(pad.rawValue)
+            }
+        }
+    }
+
+    /// Sadržaj Vode unutar postojećeg islanda (donji red ikona ostaje).
+    /// 4 ikone u užoj traci da se ne razvuku preko cijelog bara.
     private var waterToolPanel: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Označi područje (klik/povuci). Spojena polja = jedno more. Zatim zatvori Vode i klikni na more za editor.")
-                .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.75))
-            HStack(spacing: 8) {
-                ForEach(PadBrush.waterPads) { pad in
-                    padSwatch(pad, selected: padBrush == pad)
+        Group {
+            if let pad = waterSubmenu {
+                waterSubmenuPanel(pad)
+            } else {
+                waterCategoryIconsRow
+            }
+        }
+        .frame(maxWidth: (waterSubmenu == .more || (waterSubmenu?.usesWaterPathDraft == true)) ? 560 : 340)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .animation(.easeInOut(duration: 0.22), value: waterSubmenu)
+        .animation(.easeInOut(duration: 0.18), value: seaTool)
+        .animation(.easeInOut(duration: 0.18), value: isSeaSurfaceDraftActive)
+        .animation(.easeInOut(duration: 0.18), value: isRiverPathDraftActive)
+    }
+
+    /// Četiri ikone ravnomjerno unutar uže trake.
+    private var waterCategoryIconsRow: some View {
+        let icon = CGFloat(gameState.bottomBarIconScale)
+        let buttonSize: CGFloat = 44 * icon
+        let activePathPad = gameState.mapEditorState?.riverPathDraft?.pad
+        return HStack(spacing: 0) {
+            ForEach(PadBrush.waterPads) { pad in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        if isRiverPathDraftActive, activePathPad != pad {
+                            gameState.finishRiverPathDraft()
+                        }
+                        paintMode = .podloge
+                        padBrush = pad
+                        waterSubmenu = pad
+                        if pad == .more { seaTool = .povrsina }
+                        enterTopDownForWaterTools()
+                    }
+                } label: {
+                    VStack(spacing: 4) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.white.opacity(0.12))
+                            if let symbol = pad.waterSystemImage {
+                                Image(systemName: symbol)
+                                    .font(.system(size: buttonSize * 0.42, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.95))
+                            } else {
+                                padPreview(pad)
+                                    .clipShape(Circle())
+                                    .padding(8)
+                            }
+                        }
+                        .frame(width: buttonSize, height: buttonSize)
+                        Text(pad.rawValue)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.88))
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .help(pad.rawValue)
+            }
+        }
+    }
+
+    /// Podizbornik jedne vode: Nazad + alati. More: Površina i Dubina.
+    private func waterSubmenuPanel(_ pad: PadBrush) -> some View {
+        let icon = CGFloat(gameState.bottomBarIconScale)
+        let buttonSize: CGFloat = 40 * icon
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10 * icon) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        if pad.usesWaterPathDraft, isRiverPathDraftActive {
+                            gameState.finishRiverPathDraft()
+                        }
+                        waterSubmenu = nil
+                    }
+                } label: {
+                    Image(systemName: "chevron.backward")
+                        .font(.system(size: buttonSize * 0.42, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.95))
+                        .frame(width: buttonSize, height: buttonSize)
+                        .background(Color.white.opacity(0.18))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .help("Nazad")
+
+                Text(pad.rawValue)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(1)
+
+                Rectangle()
+                    .fill(.white.opacity(0.2))
+                    .frame(width: 1, height: 28)
+
+                if pad == .more {
+                    if isSeaSurfaceDraftActive {
+                        Text("Oblik mora")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.75))
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.22)) {
+                                gameState.finishSeaSurfaceDraft()
+                            }
+                        } label: {
+                            Text("Gotovo")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.black.opacity(0.85))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.yellow.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Završi uređivanje oblika mora")
+                    } else {
+                        seaToolChip(.povrsina, buttonSize: buttonSize)
+                        seaToolChip(.dubina, buttonSize: buttonSize)
+                    }
+                } else if pad.usesWaterPathDraft {
+                    let pathActive = isRiverPathDraftActive
+                        && gameState.mapEditorState?.riverPathDraft?.pad == pad
+                    if pathActive {
+                        Text("Linija · \(pad.rawValue.lowercased())")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.75))
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.22)) {
+                                gameState.finishRiverPathDraft()
+                            }
+                        } label: {
+                            Text("Gotovo")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.black.opacity(0.85))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.yellow.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Završi uređivanje (\(pad.rawValue.lowercased()))")
+                    } else {
+                        HStack(spacing: 6) {
+                            Image(systemName: "line.diagonal")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(.yellow)
+                            Text("Povuci liniju")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.yellow)
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 8))
+                        .help("Klikni i povuci na mapi da nacrtaš \(pad.rawValue.lowercased()).")
+                    }
+                }
+
+                if !((pad == .more && isSeaSurfaceDraftActive)
+                     || (pad.usesWaterPathDraft && isRiverPathDraftActive
+                         && gameState.mapEditorState?.riverPathDraft?.pad == pad)) {
+                    Spacer(minLength: 0)
+                }
+            }
+
+            if pad == .more, seaTool == .dubina, !isSeaSurfaceDraftActive {
+                HStack(spacing: 8) {
+                    Text("Dubina:")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.7))
+                    ForEach(SeaDepthPreset.allCases) { preset in
+                        Button {
+                            seaDepthPreset = preset
+                        } label: {
+                            Text(preset.label)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(seaDepthPreset == preset ? .yellow : .white.opacity(0.85))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(
+                                    seaDepthPreset == preset ? Color.white.opacity(0.22) : Color.white.opacity(0.08),
+                                    in: RoundedRectangle(cornerRadius: 7)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .help("Postavi dubinu \(preset.label)")
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+
+            if pad.usesWaterPathDraft,
+               isRiverPathDraftActive,
+               let draft = gameState.mapEditorState?.riverPathDraft,
+               draft.pad == pad {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text("Zaobljenje")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .frame(width: 72, alignment: .leading)
+                        Slider(
+                            value: Binding(
+                                get: { Double(draft.curve) },
+                                set: { gameState.setRiverPathCurve(CGFloat($0)) }
+                            ),
+                            in: 0...1
+                        )
+                        .tint(.yellow)
+                    }
+                    HStack(spacing: 8) {
+                        Text("Širina")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .frame(width: 72, alignment: .leading)
+                        Slider(
+                            value: Binding(
+                                get: { Double(draft.halfWidth) },
+                                set: { gameState.setRiverPathWidth(CGFloat($0)) }
+                            ),
+                            in: 0.35...6
+                        )
+                        .tint(.yellow)
+                    }
                 }
             }
         }
     }
 
-    /// Island editora mora: Nazad + Površina mora (kasnije ostali alati).
+    private func seaToolChip(_ tool: SeaEditorTool, buttonSize: CGFloat) -> some View {
+        let selected = seaTool == tool
+        return Button {
+            seaTool = tool
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: tool.systemImage)
+                    .font(.system(size: 13, weight: .medium))
+                Text(tool.rawValue)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(selected ? .yellow : .white.opacity(0.88))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(selected ? Color.white.opacity(0.2) : Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(selected ? Color.yellow.opacity(0.65) : Color.clear, lineWidth: 1.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .help(tool == .povrsina
+            ? "Označi površinu mora (klik/povuci)."
+            : "Postavi dubinu mora na označenim ćelijama.")
+    }
+
+    /// Island editora postojećeg mora (klik na more): Nazad + Površina / Dubina.
     private var seaEditorBar: some View {
         let icon = CGFloat(gameState.bottomBarIconScale)
         let area = CGFloat(gameState.bottomBarAreaScale)
         let buttonSize: CGFloat = 44 * icon
-        let tool = gameState.mapEditorState?.seaEditorTool
+        let tool = gameState.mapEditorState?.seaEditorTool ?? .povrsina
         let cellCount = gameState.mapEditorState?.editingSeaCells.count ?? 0
-        return VStack(spacing: 0) {
+        return VStack(alignment: .leading, spacing: 8) {
             Text("More · \(cellCount) ćelija")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.white.opacity(0.85))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 18)
-                .padding(.top, 14)
-                .padding(.bottom, 8)
-            Rectangle()
-                .fill(.white.opacity(0.15))
-                .frame(height: 1)
-                .padding(.horizontal, 16)
             HStack(spacing: 12 * icon) {
                 Button {
                     withAnimation(.easeInOut(duration: 0.28)) {
@@ -490,33 +864,48 @@ struct MapEditorView: View {
                 .buttonStyle(.plain)
                 .help("Nazad")
 
-                Button {
-                    gameState.selectSeaEditorTool(tool == .povrsina ? nil : .povrsina)
-                } label: {
-                    Image(systemName: SeaEditorTool.povrsina.systemImage)
-                        .font(.system(size: buttonSize * 0.42, weight: .medium))
-                        .foregroundStyle(tool == .povrsina ? .yellow : .white.opacity(0.9))
-                        .frame(width: buttonSize, height: buttonSize)
-                        .background(tool == .povrsina ? Color.white.opacity(0.28) : Color.white.opacity(0.12))
-                        .clipShape(Circle())
-                        .overlay(
-                            Circle()
-                                .strokeBorder(tool == .povrsina ? Color.yellow.opacity(0.7) : Color.clear, lineWidth: 2)
-                        )
+                ForEach(SeaEditorTool.allCases) { option in
+                    Button {
+                        if option == .povrsina {
+                            // Uredi unutarnju crtu (vanjska obala fiksna).
+                            enterTopDownForWaterTools()
+                            gameState.beginSeaSurfaceDraftFromEditingSea()
+                            waterSubmenu = .more
+                            padBrush = .more
+                            seaTool = .povrsina
+                            expandedItem = .tool(.vode)
+                        } else {
+                            gameState.selectSeaEditorTool(option)
+                            seaTool = option
+                            waterSubmenu = .more
+                            padBrush = .more
+                            expandedItem = .tool(.vode)
+                            gameState.exitSeaEditor()
+                            enterTopDownForWaterTools()
+                        }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: option.systemImage)
+                                .font(.system(size: buttonSize * 0.32, weight: .medium))
+                            Text(option.rawValue)
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundStyle(tool == option ? .yellow : .white.opacity(0.9))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(tool == option ? Color.white.opacity(0.22) : Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                    .help(option == .povrsina
+                        ? "Pomakni, nakoši i zakrivi unutarnju crtu mora (vanjska ostaje)."
+                        : "Postavi dubinu mora.")
                 }
-                .buttonStyle(.plain)
-                .help(SeaEditorTool.povrsina.rawValue)
-
-                Text(SeaEditorTool.povrsina.rawValue)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(tool == .povrsina ? .yellow : .white.opacity(0.8))
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
         }
-        .fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
         .frame(maxWidth: 520 * area)
         .background { BottomBarIslandChrome(corner: 20) }
         .clipShape(RoundedRectangle(cornerRadius: 20))
@@ -525,10 +914,31 @@ struct MapEditorView: View {
         .transition(.opacity)
     }
 
+    /// Vode: kamera odozgo da se jasnije vidi označavanje.
+    private func enterTopDownForWaterTools() {
+        var s = gameState.mapCameraSettings
+        guard !s.isTopDown else { return }
+        s.isTopDown = true
+        gameState.setMapCameraSettingsSilent(s)
+    }
+
+    /// Zemlja: kosa kamera (nema dubine — samo površina).
+    private func enterTiltedCameraForLandTools() {
+        var s = gameState.mapCameraSettings
+        guard s.isTopDown else { return }
+        s.isTopDown = false
+        gameState.setMapCameraSettingsSilent(s)
+    }
+
     private func padSwatch(_ pad: PadBrush, selected: Bool) -> some View {
         Button {
             paintMode = .podloge
             padBrush = pad
+            if pad.isWater {
+                enterTopDownForWaterTools()
+            } else {
+                enterTiltedCameraForLandTools()
+            }
         } label: {
             VStack(spacing: 3) {
                 padPreview(pad)
@@ -564,7 +974,7 @@ struct MapEditorView: View {
                 Color(red: 0.22, green: 0.22, blue: 0.24)
                 Color(red: 0.78, green: 0.16, blue: 0.14)
             }
-        case .voda:
+        case .rijeka:
             Color(red: 0.25, green: 0.55, blue: 0.88)
         case .jezero:
             Color(red: 0.18, green: 0.48, blue: 0.78)
@@ -771,6 +1181,7 @@ struct MapEditorView: View {
         .clipShape(RoundedRectangle(cornerRadius: compact ? 20 : 24))
         .shadow(color: .black.opacity(0.25 * gameState.bottomBarOpacity), radius: 8, x: 0, y: 2)
         .animation(.easeInOut(duration: 0.28), value: expandedItem)
+        .animation(.easeInOut(duration: 0.22), value: waterSubmenu)
         .padding(.horizontal, 18)
     }
 
@@ -867,19 +1278,16 @@ struct MapEditorView: View {
             .buttonStyle(.plain)
 
             Button {
-                let result = gameState.saveEditorMap()
-                // Auto-spremanje radi u pozadini; alert samo ako ručno spremanje ne uspije.
-                if !result.success {
-                    saveLoadMessage = result.errorMessage ?? "Spremanje nije uspjelo."
-                    showSaveLoadAlert = true
-                }
+                let current = gameState.mapEditorMapName.trimmingCharacters(in: .whitespacesAndNewlines)
+                saveNameDraft = current.isEmpty ? "Mapa" : current
+                showSaveNameDialog = true
             } label: {
                 Label("Spremi", systemImage: "square.and.arrow.down")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.white.opacity(0.9))
             }
             .buttonStyle(.plain)
-            .help("Mape se same spremaju pri uređivanju; ovo forsira spremanje odmah.")
+            .help("Spremi mapu pod imenom. Ako ime već postoji, pita za prebrisivanje.")
 
             Button {
                 if gameState.loadEditorMap(fromSlot: .solo) {

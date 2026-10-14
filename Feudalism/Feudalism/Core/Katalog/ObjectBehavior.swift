@@ -148,6 +148,11 @@ enum ObjectBehaviorRegistry {
             Gates.objectId,
             Miners.objectId,
             Engineering.objectId,
+            TowerRoundTall.objectId,
+            TowerSquareSmall.objectId,
+            TowerSquareMedium.objectId,
+            TowerSquareLarge.objectId,
+            TowerRoundLarge.objectId,
             Lager.objectId,
             Wood.objectId,
             Carriage.objectId,
@@ -157,10 +162,13 @@ enum ObjectBehaviorRegistry {
             Diplomacy.objectId,
             UndergroundEntrance.objectId,
             UndergroundCorridor.objectId,
+            UndergroundLightOpening.objectId,
             Road.objectId,
             StoneSlab.objectId,
             Bridge.objectId,
             Tunnel.objectId,
+            Canal.objectId,
+            River.objectId,
             Flag.objectId,
             Torch.objectId,
             Monument.objectId,
@@ -270,9 +278,9 @@ enum ObjectBehaviorRegistry {
             return .standard(healthLevels: 5, hpPerLevel: 10, isFlammable: true, fireDamagePerTick: 2, buildCost: .zero)
         case UndergroundEntrance.objectId:
             return .standard(healthLevels: 4, hpPerLevel: 8, isFlammable: false, fireDamagePerTick: 0, buildCost: .zero)
-        case UndergroundCorridor.objectId:
+        case UndergroundCorridor.objectId, UndergroundLightOpening.objectId:
             return .standard(healthLevels: 3, hpPerLevel: 6, isFlammable: false, fireDamagePerTick: 0, buildCost: .zero)
-        case Road.objectId, StoneSlab.objectId:
+        case Road.objectId, StoneSlab.objectId, Canal.objectId, River.objectId:
             return .standard(healthLevels: 3, hpPerLevel: 6, isFlammable: false, fireDamagePerTick: 0, buildCost: .zero)
         case Bridge.objectId, Tunnel.objectId:
             return .standard(healthLevels: 5, hpPerLevel: 8, isFlammable: true, fireDamagePerTick: 2, buildCost: .zero)
@@ -282,6 +290,17 @@ enum ObjectBehaviorRegistry {
             return .standard(healthLevels: 5, hpPerLevel: 8, isFlammable: false, fireDamagePerTick: 0, buildCost: .zero)
         case Roof.objectId:
             return .standard(healthLevels: 3, hpPerLevel: 6, isFlammable: true, fireDamagePerTick: 2, buildCost: .zero)
+        case let id where TowerKind.isTower(id):
+            if let kind = TowerKind.kind(for: id) {
+                return .standard(
+                    healthLevels: kind.healthLevels,
+                    hpPerLevel: kind.hpPerLevel,
+                    isFlammable: true,
+                    fireDamagePerTick: 2,
+                    buildCost: .zero
+                )
+            }
+            fallthrough
         default:
             return ObjectBehavior(healthLevels: 5, hpPerLevel: 10, isFlammable: false, fireDamagePerTick: 0, buildCost: .zero, productionPerTick: .zero, consumptionPerTick: .zero, craftDurationTicks: 1)
         }

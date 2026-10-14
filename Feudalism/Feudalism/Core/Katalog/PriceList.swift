@@ -53,6 +53,9 @@ enum PriceList {
         case Stable.objectId: return Price(wood: 0, gold: 0)
         case Miners.objectId: return Price(wood: 0, gold: 0)
         case Engineering.objectId: return Price(wood: 0, iron: 0, gold: 0)
+        case TowerRoundTall.objectId, TowerSquareSmall.objectId, TowerSquareMedium.objectId,
+             TowerSquareLarge.objectId, TowerRoundLarge.objectId:
+            return Price(stone: 0, wood: 0)
         // Kuća
         case House.objectId: return Price(wood: 0, gold: 0)
         case Well.objectId: return Price(stone: 0, wood: 0)
@@ -91,8 +94,8 @@ enum PriceList {
         case Training.objectId: return Price(wood: 0, gold: 0)
         case Armory.objectId: return Price(stone: 0, wood: 0)
         // Podzemlje
-        case UndergroundEntrance.objectId, UndergroundCorridor.objectId: return Price(stone: 0, wood: 0)
-        case Road.objectId, StoneSlab.objectId: return Price(stone: 0)
+        case UndergroundEntrance.objectId, UndergroundCorridor.objectId, UndergroundLightOpening.objectId: return Price(stone: 0, wood: 0)
+        case Road.objectId, StoneSlab.objectId, Canal.objectId, River.objectId: return Price(stone: 0)
         case Bridge.objectId, Tunnel.objectId: return Price(stone: 0, wood: 0)
         case Flag.objectId, Torch.objectId, Candle.objectId: return Price(wood: 0)
         case Monument.objectId, Fountain.objectId: return Price(stone: 0)
@@ -105,6 +108,11 @@ enum PriceList {
     /// Obuka vojnika: oprema iz oružarnice + zlato (vidi SoldierType). Osoba se ne plaća – uzima se slobodni seljak.
     static func soldierPrice(_ type: SoldierType) -> Price {
         Price(items: type.equipment.merging([.gold: type.gold]) { $0 + $1 })
+    }
+
+    /// Obuka specijalista (rudar / inženjer): zlato + slobodni seljak.
+    static func specialistPrice(_ type: SpecialistType) -> Price {
+        Price(gold: type.gold)
     }
 
     /// Koliko zlata stoji jedna jedinica robe. Zlato se ne kupuje.

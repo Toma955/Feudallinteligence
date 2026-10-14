@@ -18,7 +18,8 @@ enum Underground {
     static let metersPerRockRepeat: CGFloat = 6
 
     static let entranceObjectIds: Set<String> = [
-        UndergroundEntrance.objectId, Iron.objectId, Stone.objectId, Well.objectId
+        UndergroundEntrance.objectId, Iron.objectId, Stone.objectId, Well.objectId,
+        UndergroundLightOpening.objectId
     ]
 
     static func entranceName(objectId: String) -> String {
@@ -27,6 +28,7 @@ enum Underground {
         case Stone.objectId: return Stone.gameObject.name
         case Well.objectId: return Well.gameObject.name
         case UndergroundEntrance.objectId: return UndergroundEntrance.gameObject.name
+        case UndergroundLightOpening.objectId: return UndergroundLightOpening.gameObject.name
         default: return "Podzemlje"
         }
     }
@@ -83,18 +85,30 @@ enum Underground {
             let x = (CGFloat(p.col) + CGFloat(p.width) / 2) * cell - halfW
             let z = (CGFloat(p.row) + CGFloat(p.height) / 2) * cell - halfH
             let radius = max(0.6, CGFloat(min(p.width, p.height)) * cell * 0.45)
-            holder.addChildNode(makeShaft(radius: radius, at: SCNVector3(x, 0, z), isWell: p.objectId == Well.objectId))
+            let kind: ShaftKind =
+                p.objectId == Well.objectId ? .well
+                : p.objectId == UndergroundLightOpening.objectId ? .lightOpening
+                : .mine
+            holder.addChildNode(makeShaft(radius: radius, at: SCNVector3(x, 0, z), kind: kind))
         }
     }
 
-    private static func makeShaft(radius: CGFloat, at position: SCNVector3, isWell: Bool) -> SCNNode {
+    private enum ShaftKind { case mine, well, lightOpening }
+
+    private static func makeShaft(radius: CGFloat, at position: SCNVector3, kind: ShaftKind) -> SCNNode {
         let node = SCNNode()
         node.position = position
         node.categoryBitMask = 1
 
-        let glowColor = isWell
-            ? NSColor(red: 0.45, green: 0.75, blue: 1, alpha: 1)
-            : NSColor(red: 1, green: 0.78, blue: 0.42, alpha: 1)
+        let glowColor: NSColor
+        switch kind {
+        case .well:
+            glowColor = NSColor(red: 0.45, green: 0.75, blue: 1, alpha: 1)
+        case .lightOpening:
+            glowColor = NSColor(red: 1, green: 0.92, blue: 0.62, alpha: 1)
+        case .mine:
+            glowColor = NSColor(red: 1, green: 0.78, blue: 0.42, alpha: 1)
+        }
 
         let ring = SCNTorus(ringRadius: radius, pipeRadius: 0.08)
         let ringMat = SCNMaterial()

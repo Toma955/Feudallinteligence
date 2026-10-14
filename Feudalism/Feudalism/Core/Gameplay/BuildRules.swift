@@ -31,14 +31,17 @@ enum BuildRules {
     /// Ceste, ploče i ukras dvorca idu na bilo koju građevnu ćeliju.
     static let infrastructureObjectIds: Set<String> = [
         Road.objectId, StoneSlab.objectId, Bridge.objectId, Tunnel.objectId,
+        Canal.objectId, River.objectId,
         Flag.objectId, Torch.objectId, Monument.objectId, Candle.objectId,
-        OrnamentalTree.objectId, Fountain.objectId, Roof.objectId
+        OrnamentalTree.objectId, Fountain.objectId, Roof.objectId,
+        Well.objectId, Spring.objectId
     ]
 
     /// Što se smije graditi u podzemlju. Kasnije se lista širi.
     static let undergroundObjectIds: Set<String> = [
         UndergroundEntrance.objectId,
         UndergroundCorridor.objectId,
+        UndergroundLightOpening.objectId,
         Smocnica.objectId,
         Lager.objectId
     ]
@@ -69,7 +72,7 @@ enum BuildRules {
         if decorationObjectIds.contains(objectId) || waterObjectIds.contains(objectId) || infrastructureObjectIds.contains(objectId) {
             return .none
         }
-        if objectId == UndergroundCorridor.objectId {
+        if objectId == UndergroundCorridor.objectId || objectId == UndergroundLightOpening.objectId {
             return .none
         }
         switch requiredDeposit(for: objectId) {

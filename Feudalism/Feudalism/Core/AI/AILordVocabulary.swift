@@ -28,6 +28,7 @@ struct AILordVocabulary: Codable, Equatable {
         tokens += rules.buildings.map { "building:\($0.objectId)" }
         tokens += rules.goods.map { "good:\($0.id)" }
         tokens += rules.army.soldiers.map { "soldier:\($0.id)" }
+        tokens += SpecialistType.allCases.map { "specialist:\($0.id)" }
         tokens += rules.storage.map { "storage:\($0.id)" }
         tokens += PersonRole.allCases.map { "role:\($0.rawValue)" }
         tokens += rules.seasons.order.map { "season:\($0)" }

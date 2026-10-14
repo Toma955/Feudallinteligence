@@ -15,7 +15,7 @@ enum Well: PlaceableSceneKitObject {
 
     static var gameObject: GameObject {
         let d = ObjectDimensions.well
-        return GameObject(id: objectId, name: "Bunar", category: .dvorac, width: d.cellWidth, height: d.cellHeight, displayCode: displayCode, modelAssetName: nil)
+        return GameObject(id: objectId, name: "Bunar", category: .infrastruktura, width: d.cellWidth, height: d.cellHeight, displayCode: displayCode, modelAssetName: nil)
     }
 
     static func loadSceneKitNode(from bundle: Bundle = .main) -> SCNNode? {

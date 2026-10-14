@@ -45,6 +45,7 @@ struct MainMenuView: View {
     @State private var islandExpanded = false
     @State private var islandPage: MenuIslandPage = .none
     @State private var soloShowResources = false
+    @State private var soloShowPersona = false
     @State private var soloImportTick = 0
     @State private var aboutShowHowTo = false
     @State private var aboutInfoTick = 0
@@ -69,6 +70,7 @@ struct MainMenuView: View {
                     SoloSetupView(
                         isPresented: $showSoloSetup,
                         showResources: $soloShowResources,
+                        showPersona: $soloShowPersona,
                         importTick: soloImportTick
                     )
                         .environmentObject(gameState)
@@ -154,9 +156,12 @@ struct MainMenuView: View {
                     soloTitle: showSoloSetup ? L("menu_solo") : nil,
                     soloResourcesTitle: L("solo_resources"),
                     soloImportTitle: L("solo_import_map"),
+                    soloPersonaTitle: L("solo_persona"),
                     soloResourcesOn: soloShowResources,
+                    soloPersonaOn: soloShowPersona,
                     onSoloResources: toggleSoloResources,
                     onSoloImport: requestSoloImport,
+                    onSoloPersona: toggleSoloPersona,
                     aboutTitle: showAbout ? L("menu_about") : nil,
                     aboutInfoTitle: L("about_info"),
                     aboutHowToTitle: L("about_how_to"),
@@ -193,6 +198,7 @@ struct MainMenuView: View {
         .onChange(of: showSoloSetup) { open in
             if !open {
                 soloShowResources = false
+                soloShowPersona = false
                 islandExpanded = false
             }
         }
@@ -223,7 +229,14 @@ struct MainMenuView: View {
     }
 
     private func toggleSoloResources() {
+        soloShowPersona = false
         soloShowResources.toggle()
+        withAnimation(menuIslandMotion) { islandExpanded = false }
+    }
+
+    private func toggleSoloPersona() {
+        soloShowResources = false
+        soloShowPersona.toggle()
         withAnimation(menuIslandMotion) { islandExpanded = false }
     }
 

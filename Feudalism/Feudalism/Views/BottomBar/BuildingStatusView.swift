@@ -39,7 +39,7 @@ struct BuildingStatusView: View {
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Color(hex: seat.colorHex) ?? .white)
                 }
-                if name == "Kula" {
+                if TowerKind.isTower(p.objectId) || name == "Kula" {
                     healthBar(gameState.healthPercent(p))
                 }
                 Spacer(minLength: 8)
@@ -55,6 +55,12 @@ struct BuildingStatusView: View {
             }
             if mine, p.objectId == Training.objectId {
                 TrainingPanelView(faction: faction)
+            }
+            if mine, p.objectId == Miners.objectId {
+                SpecialistPanelView(faction: faction, types: [.miner])
+            }
+            if mine, p.objectId == Engineering.objectId {
+                SpecialistPanelView(faction: faction, types: [.engineer])
             }
             if mine, p.objectId == Market.objectId, state.hasWorkerInside {
                 MarketStockPanel(focused: $marketFocused, sells: false, adjusts: true)

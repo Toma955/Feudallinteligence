@@ -174,7 +174,8 @@ private func makeTerrainGeometryWithHeights(gameMap: GameMap) -> SCNGeometry? {
     let coveredByFloors = cellsCoveredByBuildingFloors(gameMap)
     for r in 0..<rows {
         for c in 0..<cols {
-            // More: zasada ravna površina (boja); SeaBasin korito/voda kasnije u editoru mora.
+            // More: rupa u gornjoj plohi — korito + voda dolaze iz SeaBasin.
+            if gameMap.cell(row: r, col: c)?.povrsina == .more { continue }
             let surface = gameMap.surface(row: r, col: c)
             let tint = terrainPadTint(gameMap.cell(row: r, col: c), gameMap: gameMap, row: r, col: c, covered: coveredByFloors)
             let base = Int32(vertices.count)
@@ -196,7 +197,7 @@ private func makeTerrainGeometryWithHeights(gameMap: GameMap) -> SCNGeometry? {
             ])
         }
     }
-    // Cijela mapa more: nema gornje plohe (samo SeaBasin korito).
+    // Nema gornje plohe (samo more / prazno) — SeaBasin drži korito.
     if topIndices.isEmpty {
         if vertices.isEmpty {
             vertices.append(SCNVector3(0, 0, 0))
@@ -289,7 +290,7 @@ private func makeTerrainGeometryWithHeights(gameMap: GameMap) -> SCNGeometry? {
 }
 
 /// Boja ploče na terenu: bijelo = obična trava, inače podloga ostaje vidljiva.
-/// Pod građevine prekriva podlogu — tu teren ostaje neutralan. Obala je SeaBasin coast mesh.
+/// Pod građevine prekriva podlogu — tu teren ostaje neutralan.
 private func terrainPadTint(_ cell: MapCell?, gameMap: GameMap, row: Int, col: Int, covered: Set<MapCoordinate> = []) -> [Float] {
     if covered.contains(MapCoordinate(row: row, col: col)) { return [1, 1, 1] }
     guard let cell, let pad = buildPadOverlayColor(cell, row: row, col: col) else { return [1, 1, 1] }
@@ -422,8 +423,7 @@ private func makeHeightTerrainNode(gameMap: GameMap) -> SCNNode {
     node.name = "terrain"
     node.categoryBitMask = 1
     node.renderingOrder = -100
-    // SeaBasin (korito + voda) isključen dok se uređuje samo površina mora.
-    // SeaBasin.attach(to: node, gameMap: gameMap)
+    SeaBasin.attach(to: node, gameMap: gameMap)
     return node
 }
 
@@ -571,6 +571,8 @@ private final class SceneKitMapNSView: NSView {
     var onZoomDelta: ((CGFloat) -> Void)?
     var onRotationDelta: ((CGFloat) -> Void)?
     var onTiltDelta: ((CGFloat) -> Void)?
+    /// Space: kosi ↔ odozgo (nacrt).
+    var onToggleTopDown: (() -> Void)?
     var onClick: ((Int, Int) -> Void)?
     var onWallLinePreview: (([(Int, Int)]) -> Void)?
     var onWallLineCommit: (([(Int, Int)]) -> Void)?
@@ -595,6 +597,23 @@ private final class SceneKitMapNSView: NSView {
     var onTerrainPaintPreview: ((Int, Int, Int, Int) -> Void)?
     /// Primjena na pravokutnik pri mouseUp.
     var onTerrainPaintCommit: ((Int, Int, Int, Int) -> Void)?
+    /// Uređivanje unutarnje crte mora: kontrolne točke aktivne.
+    var seaHandleEditing = false
+    /// Dimenzije mape za float ćelijske koordinate (handle drag).
+    var mapRows: Int = 200
+    var mapCols: Int = 200
+    /// Povlačenje vrha: (index, row, col, ended).
+    var onSeaVertexDrag: ((Int, CGFloat, CGFloat, Bool) -> Void)?
+    /// Klik na mid-točku: podijeli rub (edge index).
+    var onSeaMidSplit: ((Int) -> Void)?
+    private(set) var draggingSeaHandle: (kind: SeaSurfaceHandleKind, index: Int)?
+    var isSeaHandleDragging: Bool { draggingSeaHandle != nil }
+    /// Uređivanje linije rijeke.
+    var riverHandleEditing = false
+    var onRiverVertexDrag: ((Int, CGFloat, CGFloat, Bool) -> Void)?
+    var onRiverMidSplit: ((Int) -> Void)?
+    private(set) var draggingRiverHandle: (kind: RiverPathHandleKind, index: Int)?
+    var isRiverHandleDragging: Bool { draggingRiverHandle != nil }
     var hasObjectSelected: Bool = false
     /// Pan kamere dozvoljen samo kad ništa nije označeno (nema objekta za postavljanje, nije Teren, nije Briši).
     var cameraPanAllowed: Bool = true
@@ -682,6 +701,8 @@ private final class SceneKitMapNSView: NSView {
     var onGroundMarkPreview: (((row: Int, col: Int), (row: Int, col: Int))?) -> Void = { _ in }
     var onGroundMarkCommit: ((row: Int, col: Int), (row: Int, col: Int)) -> Void = { _, _ in }
     var onGroundMarkDraftStarted: () -> Void = {}
+    /// Prekid nacrta oznake (bez potvrde) – makni označene osobe.
+    var onGroundMarkCancelled: () -> Void = {}
     var hasMarkedSoldiers: (() -> Bool)?
     var onMoveOrder: ((Int, Int) -> Void)?
     private var pendingMoveOrder: (row: Int, col: Int)?
@@ -735,7 +756,7 @@ private final class SceneKitMapNSView: NSView {
         if groundMarkEnabled, !enabled, markFollowing {
             markFollowing = false
             if let origin = markOrigin, let far = markFar {
-                onGroundMarkCommit(origin, far)
+                finishGroundMark(origin: origin, far: far)
             }
         }
         groundMarkEnabled = enabled
@@ -743,10 +764,7 @@ private final class SceneKitMapNSView: NSView {
 
     private func handleGroundMarkClick(_ cell: (row: Int, col: Int)) {
         if markFollowing, let origin = markOrigin {
-            markFollowing = false
-            markFar = cell
-            onGroundMarkPreview((origin, cell))
-            onGroundMarkCommit(origin, cell)
+            finishGroundMark(origin: origin, far: cell)
         } else {
             markOrigin = cell
             markFar = cell
@@ -755,6 +773,16 @@ private final class SceneKitMapNSView: NSView {
             onGroundMarkPreview((cell, cell))
             markDragged = false
         }
+    }
+
+    /// Završi oznaku: potvrdi ljude, makni zeleni kvadrat i lokalni draft.
+    private func finishGroundMark(origin: (row: Int, col: Int), far: (row: Int, col: Int)) {
+        markFollowing = false
+        markDragged = false
+        markFar = far
+        onGroundMarkCommit(origin, far)
+        markOrigin = nil
+        markFar = nil
     }
 
     private func updateGroundMarkFar(at loc: NSPoint) {
@@ -788,17 +816,21 @@ private final class SceneKitMapNSView: NSView {
         )
     }
 
-    private func clearGroundMark() {
+    private func clearGroundMark(cancelSelection: Bool = true) {
+        let hadDraft = markOrigin != nil
         markOrigin = nil
         markFar = nil
         markFollowing = false
         markDragged = false
         onGroundMarkPreview(nil)
+        if cancelSelection, hadDraft {
+            onGroundMarkCancelled()
+        }
     }
 
     func dismissGroundMark() {
-        guard markOrigin != nil else { return }
-        clearGroundMark()
+        guard markOrigin != nil || markFollowing else { return }
+        clearGroundMark(cancelSelection: true)
     }
 
     override func mouseEntered(with event: NSEvent) {
@@ -970,10 +1002,15 @@ private final class SceneKitMapNSView: NSView {
     }
 
     private func handleKeyDown(_ event: NSEvent) -> Bool {
+        // Ne kradi tipke dok se tipka u polju teksta.
+        if let fr = window?.firstResponder, fr is NSTextView || fr is NSTextField { return false }
         switch event.keyCode {
         case 53:
             if markOrigin != nil { clearGroundMark() }
             onRightClick?()
+            return true
+        case 49: // Space — nacrt odozgo ↔ kosi pogled
+            onToggleTopDown?()
             return true
         case 126: onTiltDelta?(0.06); return true
         case 125: onTiltDelta?(-0.06); return true
@@ -1066,6 +1103,64 @@ private final class SceneKitMapNSView: NSView {
         return nil
     }
 
+    private func seaHandleHit(at pointInContainer: NSPoint) -> (kind: SeaSurfaceHandleKind, index: Int)? {
+        guard seaHandleEditing, let sv = scnView else { return nil }
+        let hitPointInView = convert(pointInContainer, to: sv)
+        guard sv.bounds.contains(hitPointInView) else { return nil }
+        let hits = sv.hitTest(hitPointInView, options: [
+            .searchMode: SCNHitTestSearchMode.all.rawValue,
+            .categoryBitMask: 1
+        ])
+        var vertexHit: (SeaSurfaceHandleKind, Int)?
+        for hit in hits {
+            var node: SCNNode? = hit.node
+            while let current = node {
+                if let parsed = SeaSurfaceHandle.parse(nodeName: current.name ?? "") {
+                    // Mid ima prednost (manja točka na rubu).
+                    if parsed.kind == .mid { return parsed }
+                    if vertexHit == nil { vertexHit = parsed }
+                }
+                node = current.parent
+            }
+        }
+        return vertexHit
+    }
+
+    private func riverHandleHit(at pointInContainer: NSPoint) -> (kind: RiverPathHandleKind, index: Int)? {
+        guard riverHandleEditing, let sv = scnView else { return nil }
+        let hitPointInView = convert(pointInContainer, to: sv)
+        guard sv.bounds.contains(hitPointInView) else { return nil }
+        let hits = sv.hitTest(hitPointInView, options: [
+            .searchMode: SCNHitTestSearchMode.all.rawValue,
+            .categoryBitMask: 1
+        ])
+        var vertexHit: (RiverPathHandleKind, Int)?
+        for hit in hits {
+            var node: SCNNode? = hit.node
+            while let current = node {
+                if let parsed = RiverPathHandle.parse(nodeName: current.name ?? "") {
+                    if parsed.kind == .mid { return parsed }
+                    if vertexHit == nil { vertexHit = parsed }
+                }
+                node = current.parent
+            }
+        }
+        return vertexHit
+    }
+
+    /// Decimalne ćelijske koordinate (row, col) ispod kursora.
+    /// Ravnina ima prednost (brže / bez kašnjenja pri drag handlea).
+    private func groundCellFloat(at pointInContainer: NSPoint) -> (row: CGFloat, col: CGFloat)? {
+        let world = planePoint(at: pointInContainer) ?? groundPoint(at: pointInContainer)
+        guard let world else { return nil }
+        let halfW = effectiveMapWorldW(cols: mapCols) / 2
+        let halfH = effectiveMapWorldH(rows: mapRows) / 2
+        let step = worldUnitsPerCell
+        let col = (CGFloat(world.x) + halfW) / step
+        let row = (CGFloat(world.z) + halfH) / step
+        return (row, col)
+    }
+
     /// Hit na kuglu (točku sjecišta). Vraća (vertexRow, vertexCol) ako je prvi pogodak čvor s imenom "dot_*".
     private func vertexDotHit(at pointInContainer: NSPoint) -> (row: Int, col: Int)? {
         guard let sv = scnView else { return nil }
@@ -1141,6 +1236,32 @@ private final class SceneKitMapNSView: NSView {
             NSCursor.closedHand.push()
             return
         }
+        if riverHandleEditing, let handle = riverHandleHit(at: lastPanLocation) {
+            pendingClickCell = nil
+            if handle.kind == .mid {
+                onRiverMidSplit?(handle.index)
+                return
+            }
+            draggingRiverHandle = handle
+            if let pos = groundCellFloat(at: lastPanLocation) {
+                onRiverVertexDrag?(handle.index, pos.row, pos.col, false)
+            }
+            return
+        }
+        if seaHandleEditing, let handle = seaHandleHit(at: lastPanLocation) {
+            pendingClickCell = nil
+            if handle.kind == .mid {
+                // Klik na mid → podijeli rub na pola (nova točka).
+                onSeaMidSplit?(handle.index)
+                return
+            }
+            // Vrh → povuci.
+            draggingSeaHandle = handle
+            if let pos = groundCellFloat(at: lastPanLocation) {
+                onSeaVertexDrag?(handle.index, pos.row, pos.col, false)
+            }
+            return
+        }
         if (editingTransportId != nil || editingWarehouseRoute), let handle = transportHandleHit(at: lastPanLocation) {
             if handle.kind == "mid" {
                 if let cell = groundCell(at: lastPanLocation) {
@@ -1171,13 +1292,10 @@ private final class SceneKitMapNSView: NSView {
         }
         if canGroundMark, wallLineStartCell == nil, let cell = groundCell(at: lastPanLocation) {
             if markFollowing, let origin = markOrigin {
-                markFollowing = false
-                markFar = cell
                 pendingClickCell = nil
                 pendingVertexDot = nil
                 pendingCastleClick = false
-                onGroundMarkPreview((origin, cell))
-                onGroundMarkCommit(origin, cell)
+                finishGroundMark(origin: origin, far: cell)
                 return
             }
             if !castleHit(at: lastPanLocation), hasPlacementAt?(cell.row, cell.col) != true {
@@ -1212,7 +1330,7 @@ private final class SceneKitMapNSView: NSView {
             onWallLinePreview?(wallLineCells)
             return
         }
-        if isTerrainEditMode {
+        if isTerrainEditMode, !seaHandleEditing {
             // groundCell (ravnina) — mesh hit pada na rupama/moru i prekida označavanje.
             let cell = groundCell(at: lastPanLocation) ?? (row, col)
             terrainPaintOrigin = cell
@@ -1247,6 +1365,16 @@ private final class SceneKitMapNSView: NSView {
     override func mouseDragged(with event: NSEvent) {
         guard event.buttonNumber == 0 else { return }
         let loc = convert(event.locationInWindow, from: nil)
+        if let handle = draggingRiverHandle, handle.kind == .vertex, let pos = groundCellFloat(at: loc) {
+            onRiverVertexDrag?(handle.index, pos.row, pos.col, false)
+            lastPanLocation = loc
+            return
+        }
+        if let handle = draggingSeaHandle, handle.kind == .vertex, let pos = groundCellFloat(at: loc) {
+            onSeaVertexDrag?(handle.index, pos.row, pos.col, false)
+            lastPanLocation = loc
+            return
+        }
         if let index = draggingTransportCorner, let cell = groundCell(at: loc) {
             onTransportCornerDrag?(index, cell.row, cell.col)
             lastPanLocation = loc
@@ -1327,6 +1455,32 @@ private final class SceneKitMapNSView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if event.buttonNumber == 0, let handle = draggingRiverHandle {
+            let loc = convert(event.locationInWindow, from: nil)
+            if handle.kind == .vertex {
+                if let pos = groundCellFloat(at: loc) {
+                    onRiverVertexDrag?(handle.index, pos.row, pos.col, true)
+                } else {
+                    onRiverVertexDrag?(handle.index, .nan, .nan, true)
+                }
+            }
+            draggingRiverHandle = nil
+            pendingClickCell = nil
+            return
+        }
+        if event.buttonNumber == 0, let handle = draggingSeaHandle {
+            let loc = convert(event.locationInWindow, from: nil)
+            if handle.kind == .vertex {
+                if let pos = groundCellFloat(at: loc) {
+                    onSeaVertexDrag?(handle.index, pos.row, pos.col, true)
+                } else {
+                    onSeaVertexDrag?(handle.index, .nan, .nan, true)
+                }
+            }
+            draggingSeaHandle = nil
+            pendingClickCell = nil
+            return
+        }
         if event.buttonNumber == 0, draggingTransportCorner != nil {
             draggingTransportCorner = nil
             pendingClickCell = nil
@@ -1334,10 +1488,7 @@ private final class SceneKitMapNSView: NSView {
         }
         if event.buttonNumber == 0, markFollowing {
             if markDragged, let origin = markOrigin, let far = markFar ?? markOrigin {
-                markFollowing = false
-                markDragged = false
-                onGroundMarkPreview((origin, far))
-                onGroundMarkCommit(origin, far)
+                finishGroundMark(origin: origin, far: far)
             }
             pendingClickCell = nil
             pendingVertexDot = nil
@@ -1411,6 +1562,7 @@ private final class SceneKitMapNSView: NSView {
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
         case 53: onRightClick?()
+        case 49: onToggleTopDown?()
         case 126: onTiltDelta?(0.06)
         case 125: onTiltDelta?(-0.06)
         case 0x0D: if cameraPanAllowed { onPanChange?(CGPoint(x: 0, y: 28)) }
@@ -1577,8 +1729,13 @@ private func buildPadOverlayColor(_ cell: MapCell, row: Int, col: Int) -> [Float
     case .wood, nil:
         if cell.povrsina == .plodna { return [0.16, 0.68, 0.22] }
         if cell.povrsina == .pustinja { return [0.86, 0.76, 0.48] }
+        if cell.povrsina == .obala { return [0.90, 0.78, 0.48] } // plaža / obala
         if cell.povrsina == .voda { return [0.25, 0.55, 0.86] }
-        if cell.povrsina == .more { return [0.05, 0.20, 0.65] } // površina mora (bez vode/korita)
+        if cell.povrsina == .more {
+            // Dublje = tamnije plavo (seaDepth 1…10).
+            let t = Float(min(1, max(0, cell.effectiveSeaDepth / UndergroundTerrain.seaDepthMax)))
+            return [0.04 + (1 - t) * 0.06, 0.12 + (1 - t) * 0.18, 0.40 + (1 - t) * 0.35]
+        }
         if cell.povrsina == .mocvara { return [0.28, 0.38, 0.22] }
         return nil
     }
@@ -1813,6 +1970,70 @@ private func worldPositionAtCell(row: Int, col: Int, rows: Int, cols: Int) -> SC
     return SCNVector3(x, groundLevelY, z)
 }
 
+/// Ciljna točka poteza: mala svijetla točka na polju.
+private func refreshMoveOrderMarker(
+    _ node: SCNNode?,
+    marker: MoveOrderMarker?,
+    viewUnderground: Bool,
+    rows: Int,
+    cols: Int,
+    gameMap: GameMap,
+    lastKey: inout String?
+) {
+    guard let node else { return }
+    let key: String?
+    if let marker, (marker.layer == .underground) == viewUnderground {
+        key = "\(marker.row)_\(marker.col)_\(marker.layer.rawValue)"
+    } else {
+        key = nil
+    }
+    if key == lastKey { return }
+    lastKey = key
+    node.childNodes.forEach { $0.removeFromParentNode() }
+    guard let marker,
+          (marker.layer == .underground) == viewUnderground,
+          rows > 0, cols > 0,
+          marker.row >= 0, marker.row < rows,
+          marker.col >= 0, marker.col < cols else { return }
+
+    let cell = MapScale.worldUnitsPerMapCell
+    let halfW = MapScale.worldWidth(cols: cols) / 2
+    let halfH = MapScale.worldHeight(rows: rows) / 2
+    let x = CGFloat(marker.col) * cell - halfW + cell / 2
+    let z = CGFloat(marker.row) * cell - halfH + cell / 2
+    let ground = gameMap.vertexHeightAt(vertexRow: marker.row, vertexCol: marker.col)
+    let yBase: CGFloat = marker.layer == .underground ? -Underground.depthMeters : ground
+
+    let disc = SCNCylinder(radius: cell * 0.18, height: 0.06)
+    let discMat = SCNMaterial()
+    discMat.diffuse.contents = NSColor(red: 0.95, green: 0.92, blue: 0.35, alpha: 0.95)
+    discMat.emission.contents = NSColor(red: 1, green: 0.95, blue: 0.4, alpha: 1)
+    discMat.lightingModel = .constant
+    disc.materials = [discMat]
+    let discNode = SCNNode(geometry: disc)
+    discNode.position = SCNVector3(x, yBase + 0.08, z)
+    discNode.categoryBitMask = 1
+    discNode.renderingOrder = 900
+    node.addChildNode(discNode)
+
+    let pin = SCNSphere(radius: cell * 0.1)
+    let pinMat = SCNMaterial()
+    pinMat.diffuse.contents = NSColor(red: 1, green: 0.85, blue: 0.2, alpha: 1)
+    pinMat.emission.contents = NSColor(red: 1, green: 0.9, blue: 0.35, alpha: 1)
+    pinMat.lightingModel = .constant
+    pin.materials = [pinMat]
+    let pinNode = SCNNode(geometry: pin)
+    pinNode.position = SCNVector3(x, yBase + 0.28, z)
+    pinNode.categoryBitMask = 1
+    pinNode.renderingOrder = 901
+    node.addChildNode(pinNode)
+
+    pinNode.runAction(SCNAction.repeatForever(SCNAction.sequence([
+        SCNAction.scale(to: 1.18, duration: 0.45),
+        SCNAction.scale(to: 0.92, duration: 0.45)
+    ])))
+}
+
 /// Kvadrat oznake vojske: samo lagana prozirna zelena ploha na tlu (bez gornjeg obruba).
 private func refreshGroundMark(_ node: SCNNode?, origin: (row: Int, col: Int)?, far: (row: Int, col: Int)?, rows: Int, cols: Int, gameMap: GameMap?) {
     guard let node else { return }
@@ -1871,27 +2092,51 @@ private func makeGroundMarkGeometry(gameMap: GameMap, cells: Set<MapCoordinate>,
 }
 
 /// Označavanje odabranih ćelija: površina (3D) koja prati teren.
-/// `seaPreview` = plavo višećelijsko označavanje (alat More).
+/// `seaPreview` = plavo označavanje mora: vanjski kvadrat + unutarnji oblik (nacrt ili inset).
 private func refreshCellSelectionOverlay(
     overlayNode: SCNNode,
     selectedCells: Set<MapCoordinate>,
     gameMap: GameMap,
     rows: Int,
     cols: Int,
-    seaPreview: Bool = false
+    seaPreview: Bool = false,
+    seaDraft: SeaSurfaceDraft? = nil,
+    riverDraft: RiverPathDraft? = nil
 ) {
     overlayNode.childNodes.forEach { $0.removeFromParentNode() }
-    guard !selectedCells.isEmpty else { return }
-    let diffuse: NSColor
-    let emission: NSColor
-    if seaPreview {
-        // Jasan plavi preview dok se vuče područje mora.
-        diffuse = NSColor(calibratedRed: 0.10, green: 0.45, blue: 1.0, alpha: 0.72)
-        emission = NSColor(calibratedRed: 0.25, green: 0.60, blue: 1.0, alpha: 0.85)
-    } else {
-        diffuse = NSColor(calibratedRed: 0.45, green: 0.95, blue: 0.50, alpha: 0.65)
-        emission = NSColor(calibratedRed: 0.50, green: 1.0, blue: 0.55, alpha: 0.55)
+    if let draft = seaDraft {
+        addSeaSurfaceDraftOverlay(
+            to: overlayNode,
+            draft: draft,
+            gameMap: gameMap,
+            rows: rows,
+            cols: cols
+        )
+        return
     }
+    if let river = riverDraft {
+        addRiverPathDraftOverlay(
+            to: overlayNode,
+            draft: river,
+            gameMap: gameMap,
+            rows: rows,
+            cols: cols
+        )
+        return
+    }
+    guard !selectedCells.isEmpty else { return }
+    if seaPreview {
+        addSeaSurfaceNestedSquares(
+            to: overlayNode,
+            cells: selectedCells,
+            gameMap: gameMap,
+            rows: rows,
+            cols: cols
+        )
+        return
+    }
+    let diffuse = NSColor(calibratedRed: 0.45, green: 0.95, blue: 0.50, alpha: 0.65)
+    let emission = NSColor(calibratedRed: 0.50, green: 1.0, blue: 0.55, alpha: 0.55)
     if let geo = makeSelectionSurfaceGeometry(
         gameMap: gameMap, cells: selectedCells, rows: rows, cols: cols,
         diffuse: diffuse,
@@ -1899,13 +2144,543 @@ private func refreshCellSelectionOverlay(
         lift: 0.28
     ) {
         let node = SCNNode(geometry: geo)
-        node.name = seaPreview ? "seaPaintPreview" : "cellSelection"
-        // Mora biti ≠ 0 — inače kamera (AND s categoryBitMask) ne crta čvor.
+        node.name = "cellSelection"
         node.categoryBitMask = 1
         node.renderingOrder = 900
         node.opacity = 1
         overlayNode.addChildNode(node)
     }
+}
+
+/// Tema uređivanja mora: žuta obala, plavo more, zelena crta + točke.
+private enum SeaDraftTheme {
+    static let coastFill = NSColor(calibratedRed: 0.95, green: 0.82, blue: 0.28, alpha: 0.78)
+    static let coastEmit = NSColor(calibratedRed: 0.92, green: 0.78, blue: 0.22, alpha: 0.45)
+    static let seaFill = NSColor(calibratedRed: 0.12, green: 0.48, blue: 0.95, alpha: 0.72)
+    static let seaEmit = NSColor(calibratedRed: 0.20, green: 0.55, blue: 1.0, alpha: 0.40)
+    /// Zelena linija / točke — lagano prozirne.
+    static let line = NSColor(calibratedRed: 0.25, green: 0.92, blue: 0.38, alpha: 0.78)
+    static let lineEmit = NSColor(calibratedRed: 0.30, green: 0.95, blue: 0.42, alpha: 0.55)
+    static let vertex = NSColor(calibratedRed: 0.28, green: 0.95, blue: 0.40, alpha: 0.82)
+    static let mid = NSColor(calibratedRed: 0.22, green: 0.88, blue: 0.36, alpha: 0.70)
+}
+
+/// Površina mora iz nacrta: žuti vanjski (fiksno) + plavi = isti polygon kao zeleni obrub + točke na crti.
+private func addSeaSurfaceDraftOverlay(
+    to overlayNode: SCNNode,
+    draft: SeaSurfaceDraft,
+    gameMap: GameMap,
+    rows: Int,
+    cols: Int
+) {
+    let halfW = effectiveMapWorldW(cols: cols) / 2
+    let halfH = effectiveMapWorldH(rows: rows) / 2
+    let step = worldUnitsPerCell
+    let bounds = (
+        minRow: draft.outerMinRow, maxRow: draft.outerMaxRow,
+        minCol: draft.outerMinCol, maxCol: draft.outerMaxCol
+    )
+    let x0 = CGFloat(bounds.minCol) * step - halfW
+    let x1 = CGFloat(bounds.maxCol + 1) * step - halfW
+    let z0 = CGFloat(bounds.minRow) * step - halfH
+    let z1 = CGFloat(bounds.maxRow + 1) * step - halfH
+    let y = seaOverlayHeight(gameMap: gameMap, bounds: bounds) + 0.28
+
+    // 1) Žuti kvadrat (obala) — fiksni, ne miče se.
+    addSeaOverlayQuad(
+        to: overlayNode,
+        name: "seaDraftCoast",
+        xa: x0, xb: x1, za: z0, zb: z1, y: y,
+        diffuse: SeaDraftTheme.coastFill,
+        emission: SeaDraftTheme.coastEmit,
+        order: 900
+    )
+
+    let outline = draft.innerOutlinePoints()
+    guard outline.count >= 3 else { return }
+
+    // Isti world vrhovi za plavo + zeleni obrub + točke.
+    let fillY = y + 0.05
+    let rimY = y + 0.14
+    var fillVerts: [SCNVector3] = []
+    var rimVerts: [SCNVector3] = []
+    fillVerts.reserveCapacity(outline.count)
+    rimVerts.reserveCapacity(outline.count)
+    for pt in outline {
+        let x = pt.col * step - halfW
+        let z = pt.row * step - halfH
+        fillVerts.append(SCNVector3(x, fillY, z))
+        rimVerts.append(SCNVector3(x, rimY, z))
+    }
+
+    // 2) Jedan plavi polygon — rubovi = zeleni obrub (ne odvojen fill).
+    addSeaDraftPolygonFill(to: overlayNode, vertices: fillVerts)
+
+    // 3) Prozirno-zeleni obrub točno na rubu plavog.
+    let lineThickness = max(step * 0.07, 0.4)
+    for i in 0..<rimVerts.count {
+        let a = rimVerts[i]
+        let b = rimVerts[(i + 1) % rimVerts.count]
+        addSeaDraftEdgeLine(to: overlayNode, from: a, to: b, thickness: lineThickness)
+    }
+
+    // 4) Točke na pola / uglovima — ista Y kao obrub.
+    addSeaSurfaceHandles(
+        to: overlayNode,
+        draft: draft,
+        y: rimY,
+        halfW: halfW,
+        halfH: halfH,
+        step: step
+    )
+}
+
+/// Jedan plavi fill iz istih vrhova kao obrub (bez ćelijskih „trokuta”).
+private func addSeaDraftPolygonFill(to overlayNode: SCNNode, vertices: [SCNVector3]) {
+    guard vertices.count >= 3 else { return }
+    var cx: CGFloat = 0, cy: CGFloat = 0, cz: CGFloat = 0
+    for v in vertices {
+        cx += CGFloat(v.x); cy += CGFloat(v.y); cz += CGFloat(v.z)
+    }
+    let inv = 1 / CGFloat(vertices.count)
+    let centroid = SCNVector3(cx * inv, cy * inv, cz * inv)
+    let fanVerts = [centroid] + vertices
+    var fanIdx: [Int32] = []
+    for i in 0..<vertices.count {
+        fanIdx.append(contentsOf: [0, Int32(i + 1), Int32((i + 1) % vertices.count + 1)])
+    }
+    let mat = SCNMaterial()
+    // Neprozirni diffuse + transparency — bez dvostrukog alpha blendanja trokuta.
+    mat.diffuse.contents = NSColor(calibratedRed: 0.15, green: 0.52, blue: 0.98, alpha: 1)
+    mat.emission.contents = NSColor(calibratedRed: 0.18, green: 0.55, blue: 1.0, alpha: 1)
+    mat.transparency = 0.38
+    mat.isDoubleSided = true
+    mat.lightingModel = .constant
+    mat.blendMode = .alpha
+    mat.transparencyMode = .aOne
+    mat.writesToDepthBuffer = true
+    mat.readsFromDepthBuffer = true
+    let geo = SCNGeometry(
+        sources: [SCNGeometrySource(vertices: fanVerts)],
+        elements: [SCNGeometryElement(indices: fanIdx, primitiveType: .triangles)]
+    )
+    geo.materials = [mat]
+    let node = SCNNode(geometry: geo)
+    node.name = "seaDraftWater"
+    node.categoryBitMask = 1
+    node.renderingOrder = 901
+    overlayNode.addChildNode(node)
+}
+
+private func addSeaDraftEdgeLine(
+    to overlayNode: SCNNode,
+    from: SCNVector3,
+    to: SCNVector3,
+    thickness: CGFloat
+) {
+    let dx = CGFloat(to.x - from.x)
+    let dy = CGFloat(to.y - from.y)
+    let dz = CGFloat(to.z - from.z)
+    let len = sqrt(dx * dx + dy * dy + dz * dz)
+    guard len > 0.02 else { return }
+    // Box: length uz lokalni Z — look(at:) s localFront Z pouzdano leži u XZ.
+    let box = SCNBox(width: thickness, height: thickness * 0.55, length: len, chamferRadius: thickness * 0.15)
+    let mat = SCNMaterial()
+    mat.diffuse.contents = SeaDraftTheme.line
+    mat.emission.contents = SeaDraftTheme.lineEmit
+    mat.lightingModel = .constant
+    mat.blendMode = .alpha
+    mat.transparencyMode = .singleLayer
+    mat.writesToDepthBuffer = false
+    mat.readsFromDepthBuffer = false
+    box.materials = [mat]
+    let node = SCNNode(geometry: box)
+    node.name = "seaDraftEdge"
+    node.categoryBitMask = 0
+    node.renderingOrder = 920
+    node.position = SCNVector3(
+        (CGFloat(from.x) + CGFloat(to.x)) * 0.5,
+        (CGFloat(from.y) + CGFloat(to.y)) * 0.5,
+        (CGFloat(from.z) + CGFloat(to.z)) * 0.5
+    )
+    node.look(
+        at: SCNVector3(CGFloat(to.x), CGFloat(to.y), CGFloat(to.z)),
+        up: SCNVector3(0, 1, 0),
+        localFront: SCNVector3(0, 0, 1)
+    )
+    overlayNode.addChildNode(node)
+}
+
+private func addSeaSurfaceHandles(
+    to overlayNode: SCNNode,
+    draft: SeaSurfaceDraft,
+    y: CGFloat,
+    halfW: CGFloat,
+    halfH: CGFloat,
+    step: CGFloat
+) {
+    for handle in draft.controlHandles() {
+        let radius: CGFloat
+        let color: NSColor
+        switch handle.kind {
+        case .vertex:
+            radius = step * 0.14
+            color = SeaDraftTheme.vertex
+        case .mid:
+            radius = step * 0.09
+            color = SeaDraftTheme.mid
+        }
+        let sphere = SCNSphere(radius: radius)
+        let mat = SCNMaterial()
+        mat.diffuse.contents = color
+        mat.emission.contents = SeaDraftTheme.lineEmit
+        mat.lightingModel = .constant
+        mat.blendMode = .alpha
+        mat.transparencyMode = .singleLayer
+        mat.writesToDepthBuffer = false
+        mat.readsFromDepthBuffer = false
+        sphere.materials = [mat]
+        let node = SCNNode(geometry: sphere)
+        node.name = handle.nodeName
+        node.categoryBitMask = 1
+        node.renderingOrder = 950
+        let x = handle.col * step - halfW
+        let z = handle.row * step - halfH
+        node.position = SCNVector3(x, y, z)
+        overlayNode.addChildNode(node)
+
+        // Tanki zeleni obruč.
+        let ring = SCNTube(innerRadius: radius * 1.15, outerRadius: radius * 1.35, height: radius * 0.1)
+        let ringMat = SCNMaterial()
+        ringMat.diffuse.contents = SeaDraftTheme.line.withAlphaComponent(0.55)
+        ringMat.emission.contents = SeaDraftTheme.lineEmit.withAlphaComponent(0.40)
+        ringMat.lightingModel = .constant
+        ringMat.blendMode = .alpha
+        ringMat.transparencyMode = .singleLayer
+        ringMat.writesToDepthBuffer = false
+        ringMat.readsFromDepthBuffer = false
+        ring.materials = [ringMat]
+        let ringNode = SCNNode(geometry: ring)
+        ringNode.eulerAngles.x = .pi / 2
+        ringNode.categoryBitMask = 0
+        ringNode.renderingOrder = 951
+        node.addChildNode(ringNode)
+    }
+}
+
+/// Nacrt rijeke: traka širine + središnja crta + točke (vrhovi / mid).
+private func addRiverPathDraftOverlay(
+    to overlayNode: SCNNode,
+    draft: RiverPathDraft,
+    gameMap: GameMap,
+    rows: Int,
+    cols: Int
+) {
+    let halfW = effectiveMapWorldW(cols: cols) / 2
+    let halfH = effectiveMapWorldH(rows: rows) / 2
+    let step = worldUnitsPerCell
+    let center = draft.sampledCenterline(samplesPerSegment: 14)
+    guard center.count >= 2 else { return }
+    let minR = Int(floor(center.map(\.row).min()!))
+    let maxR = Int(ceil(center.map(\.row).max()!))
+    let minC = Int(floor(center.map(\.col).min()!))
+    let maxC = Int(ceil(center.map(\.col).max()!))
+    let y = seaOverlayHeight(
+        gameMap: gameMap,
+        bounds: (
+            minRow: max(0, minR), maxRow: min(rows - 1, maxR),
+            minCol: max(0, minC), maxCol: min(cols - 1, maxC)
+        )
+    ) + 0.3
+    let ribbonY = y
+    let lineY = y + 0.08
+
+    func xz(_ row: CGFloat, _ col: CGFloat) -> (CGFloat, CGFloat) {
+        (col * step - halfW, row * step - halfH)
+    }
+
+    let (fillDiffuse, fillEmit, riverLine, riverEmit): (NSColor, NSColor, NSColor, NSColor) = {
+        switch draft.pad {
+        case .mocvara:
+            return (
+                NSColor(calibratedRed: 0.32, green: 0.52, blue: 0.22, alpha: 0.50),
+                NSColor(calibratedRed: 0.40, green: 0.62, blue: 0.28, alpha: 0.30),
+                NSColor(calibratedRed: 0.55, green: 0.85, blue: 0.35, alpha: 0.85),
+                NSColor(calibratedRed: 0.60, green: 0.95, blue: 0.40, alpha: 0.55)
+            )
+        case .jezero:
+            return (
+                NSColor(calibratedRed: 0.15, green: 0.45, blue: 0.90, alpha: 0.48),
+                NSColor(calibratedRed: 0.20, green: 0.55, blue: 1.0, alpha: 0.30),
+                NSColor(calibratedRed: 0.25, green: 0.75, blue: 1.0, alpha: 0.85),
+                NSColor(calibratedRed: 0.30, green: 0.85, blue: 1.0, alpha: 0.55)
+            )
+        default: // rijeka
+            return (
+                NSColor(calibratedRed: 0.20, green: 0.62, blue: 0.95, alpha: 0.45),
+                NSColor(calibratedRed: 0.25, green: 0.70, blue: 1.0, alpha: 0.28),
+                NSColor(calibratedRed: 0.15, green: 0.85, blue: 0.55, alpha: 0.80),
+                NSColor(calibratedRed: 0.20, green: 0.95, blue: 0.60, alpha: 0.55)
+            )
+        }
+    }()
+
+    // Traka širine (područje vode).
+    let (left, right) = draft.ribbonEdges(samplesPerSegment: 14)
+    if left.count >= 2, right.count == left.count {
+        var verts: [SCNVector3] = []
+        var idx: [Int32] = []
+        for i in 0..<left.count {
+            let (lx, lz) = xz(left[i].0, left[i].1)
+            let (rx, rz) = xz(right[i].0, right[i].1)
+            verts.append(SCNVector3(lx, ribbonY, lz))
+            verts.append(SCNVector3(rx, ribbonY, rz))
+        }
+        for i in 0..<(left.count - 1) {
+            let b = Int32(i * 2)
+            idx.append(contentsOf: [b, b + 1, b + 3, b, b + 3, b + 2])
+        }
+        let mat = SCNMaterial()
+        mat.diffuse.contents = fillDiffuse
+        mat.emission.contents = fillEmit
+        mat.lightingModel = .constant
+        mat.blendMode = .alpha
+        mat.transparencyMode = .singleLayer
+        mat.writesToDepthBuffer = false
+        mat.readsFromDepthBuffer = false
+        mat.isDoubleSided = true
+        let geo = SCNGeometry(
+            sources: [SCNGeometrySource(vertices: verts)],
+            elements: [SCNGeometryElement(indices: idx, primitiveType: .triangles)]
+        )
+        geo.materials = [mat]
+        let node = SCNNode(geometry: geo)
+        node.name = "riverDraftRibbon"
+        node.categoryBitMask = 1
+        node.renderingOrder = 900
+        overlayNode.addChildNode(node)
+    }
+
+    // Središnja crta.
+    let lineThickness = max(step * 0.06, 0.35)
+    for i in 0..<(center.count - 1) {
+        let (x0, z0) = xz(center[i].row, center[i].col)
+        let (x1, z1) = xz(center[i + 1].row, center[i + 1].col)
+        addColoredEdgeLine(
+            to: overlayNode,
+            name: "riverDraftEdge",
+            from: SCNVector3(x0, lineY, z0),
+            to: SCNVector3(x1, lineY, z1),
+            thickness: lineThickness,
+            diffuse: riverLine,
+            emission: riverEmit
+        )
+    }
+
+    // Točke.
+    for handle in draft.controlHandles() {
+        let radius = handle.kind == .vertex ? step * 0.14 : step * 0.09
+        let sphere = SCNSphere(radius: radius)
+        let mat = SCNMaterial()
+        mat.diffuse.contents = riverLine
+        mat.emission.contents = riverEmit
+        mat.lightingModel = .constant
+        mat.blendMode = .alpha
+        mat.transparencyMode = .singleLayer
+        mat.writesToDepthBuffer = false
+        mat.readsFromDepthBuffer = false
+        sphere.materials = [mat]
+        let node = SCNNode(geometry: sphere)
+        node.name = handle.nodeName
+        node.categoryBitMask = 1
+        node.renderingOrder = 950
+        let (x, z) = xz(handle.row, handle.col)
+        node.position = SCNVector3(x, lineY, z)
+        overlayNode.addChildNode(node)
+    }
+}
+
+private func addColoredEdgeLine(
+    to overlayNode: SCNNode,
+    name: String,
+    from: SCNVector3,
+    to: SCNVector3,
+    thickness: CGFloat,
+    diffuse: NSColor,
+    emission: NSColor
+) {
+    let dx = CGFloat(to.x - from.x)
+    let dy = CGFloat(to.y - from.y)
+    let dz = CGFloat(to.z - from.z)
+    let len = sqrt(dx * dx + dy * dy + dz * dz)
+    guard len > 0.02 else { return }
+    let box = SCNBox(width: thickness, height: thickness * 0.55, length: len, chamferRadius: thickness * 0.15)
+    let mat = SCNMaterial()
+    mat.diffuse.contents = diffuse
+    mat.emission.contents = emission
+    mat.lightingModel = .constant
+    mat.blendMode = .alpha
+    mat.transparencyMode = .singleLayer
+    mat.writesToDepthBuffer = false
+    mat.readsFromDepthBuffer = false
+    box.materials = [mat]
+    let node = SCNNode(geometry: box)
+    node.name = name
+    node.categoryBitMask = 0
+    node.renderingOrder = 920
+    node.position = SCNVector3(
+        (CGFloat(from.x) + CGFloat(to.x)) * 0.5,
+        (CGFloat(from.y) + CGFloat(to.y)) * 0.5,
+        (CGFloat(from.z) + CGFloat(to.z)) * 0.5
+    )
+    node.look(
+        at: SCNVector3(CGFloat(to.x), CGFloat(to.y), CGFloat(to.z)),
+        up: SCNVector3(0, 1, 0),
+        localFront: SCNVector3(0, 0, 1)
+    )
+    overlayNode.addChildNode(node)
+}
+
+/// Površina mora: vanjski kvadrat = obala/plaža, unutarnji = more (tijekom drag previewa).
+private func addSeaSurfaceNestedSquares(
+    to overlayNode: SCNNode,
+    cells: Set<MapCoordinate>,
+    gameMap: GameMap,
+    rows: Int,
+    cols: Int
+) {
+    guard let bounds = seaCellsBoundingBox(cells, rows: rows, cols: cols) else { return }
+    let halfW = effectiveMapWorldW(cols: cols) / 2
+    let halfH = effectiveMapWorldH(rows: rows) / 2
+    let step = worldUnitsPerCell
+
+    let x0 = CGFloat(bounds.minCol) * step - halfW
+    let x1 = CGFloat(bounds.maxCol + 1) * step - halfW
+    let z0 = CGFloat(bounds.minRow) * step - halfH
+    let z1 = CGFloat(bounds.maxRow + 1) * step - halfH
+
+    let y = seaOverlayHeight(gameMap: gameMap, bounds: bounds) + 0.28
+    let (inner, hasInner) = seaInnerCellBounds(bounds)
+    let ix0: CGFloat
+    let ix1: CGFloat
+    let iz0: CGFloat
+    let iz1: CGFloat
+    if hasInner {
+        ix0 = CGFloat(inner.minCol) * step - halfW
+        ix1 = CGFloat(inner.maxCol + 1) * step - halfW
+        iz0 = CGFloat(inner.minRow) * step - halfH
+        iz1 = CGFloat(inner.maxRow + 1) * step - halfH
+    } else {
+        // Premalo za prsten obale — samo prikaži more (mali uvučeni kvadrat).
+        let inset = max(step * 0.15, min(x1 - x0, z1 - z0) * 0.2)
+        ix0 = x0 + inset
+        ix1 = x1 - inset
+        iz0 = z0 + inset
+        iz1 = z1 - inset
+    }
+
+    // Vanjski = žuta obala.
+    addSeaOverlayQuad(
+        to: overlayNode,
+        name: "seaPaintCoast",
+        xa: x0, xb: x1, za: z0, zb: z1, y: y,
+        diffuse: SeaDraftTheme.coastFill,
+        emission: SeaDraftTheme.coastEmit,
+        order: 900
+    )
+    // Unutarnji = plavo more (blizu žutog).
+    addSeaOverlayQuad(
+        to: overlayNode,
+        name: "seaPaintWater",
+        xa: ix0, xb: ix1, za: iz0, zb: iz1, y: y + 0.06,
+        diffuse: SeaDraftTheme.seaFill,
+        emission: SeaDraftTheme.seaEmit,
+        order: 901
+    )
+}
+
+private func addSeaOverlayQuad(
+    to overlayNode: SCNNode,
+    name: String,
+    xa: CGFloat, xb: CGFloat, za: CGFloat, zb: CGFloat, y: CGFloat,
+    diffuse: NSColor, emission: NSColor, order: Int
+) {
+    guard xb - xa > 0.05, zb - za > 0.05 else { return }
+    let vertices: [SCNVector3] = [
+        SCNVector3(xa, y, za),
+        SCNVector3(xa, y, zb),
+        SCNVector3(xb, y, zb),
+        SCNVector3(xb, y, za)
+    ]
+    let indices: [Int32] = [0, 1, 2, 0, 2, 3]
+    let mat = SCNMaterial()
+    mat.diffuse.contents = diffuse
+    mat.emission.contents = emission
+    mat.isDoubleSided = true
+    mat.lightingModel = .constant
+    mat.blendMode = .alpha
+    mat.transparencyMode = .singleLayer
+    mat.writesToDepthBuffer = false
+    mat.readsFromDepthBuffer = false
+    let geo = SCNGeometry(
+        sources: [SCNGeometrySource(vertices: vertices)],
+        elements: [SCNGeometryElement(indices: indices, primitiveType: .triangles)]
+    )
+    geo.materials = [mat]
+    let node = SCNNode(geometry: geo)
+    node.name = name
+    node.categoryBitMask = 1
+    node.renderingOrder = order
+    overlayNode.addChildNode(node)
+}
+
+/// Unutarnji pravokutnik ćelija (more); prsten oko njega = obala. `hasInner` false ako je područje premalo.
+private func seaInnerCellBounds(
+    _ bounds: (minRow: Int, maxRow: Int, minCol: Int, maxCol: Int)
+) -> (inner: (minRow: Int, maxRow: Int, minCol: Int, maxCol: Int), hasInner: Bool) {
+    let w = bounds.maxCol - bounds.minCol + 1
+    let h = bounds.maxRow - bounds.minRow + 1
+    // Plavo jako blizu žutog — obala ≈ 1 ćelija.
+    let inset = (w >= 3 && h >= 3) ? 1 : 0
+    let iMinR = bounds.minRow + inset
+    let iMaxR = bounds.maxRow - inset
+    let iMinC = bounds.minCol + inset
+    let iMaxC = bounds.maxCol - inset
+    guard iMinR <= iMaxR, iMinC <= iMaxC else {
+        return (bounds, false)
+    }
+    return ((iMinR, iMaxR, iMinC, iMaxC), true)
+}
+
+private func seaCellsBoundingBox(_ cells: Set<MapCoordinate>, rows: Int, cols: Int)
+    -> (minRow: Int, maxRow: Int, minCol: Int, maxCol: Int)? {
+    guard !cells.isEmpty else { return nil }
+    var minR = Int.max, maxR = Int.min, minC = Int.max, maxC = Int.min
+    for cell in cells {
+        guard cell.row >= 0, cell.row < rows, cell.col >= 0, cell.col < cols else { continue }
+        minR = min(minR, cell.row)
+        maxR = max(maxR, cell.row)
+        minC = min(minC, cell.col)
+        maxC = max(maxC, cell.col)
+    }
+    guard minR <= maxR, minC <= maxC else { return nil }
+    return (minR, maxR, minC, maxC)
+}
+
+private func seaOverlayHeight(
+    gameMap: GameMap,
+    bounds: (minRow: Int, maxRow: Int, minCol: Int, maxCol: Int)
+) -> CGFloat {
+    var sum: CGFloat = 0
+    var n = 0
+    for r in bounds.minRow...bounds.maxRow {
+        for c in bounds.minCol...bounds.maxCol {
+            let s = gameMap.surface(row: r, col: c)
+            sum += s.center.height
+            n += 1
+        }
+    }
+    return n > 0 ? sum / CGFloat(n) : 0
 }
 
 private func applyRenderQuality(to scnView: SCNView, gameState: GameState) {
@@ -2256,6 +3031,10 @@ struct SceneKitMapView: NSViewRepresentable {
         groundMarkNode.name = "groundMark"
         groundMarkNode.categoryBitMask = 1
         scene.rootNode.addChildNode(groundMarkNode)
+        let moveOrderMarkerNode = SCNNode()
+        moveOrderMarkerNode.name = "moveOrderMarker"
+        moveOrderMarkerNode.categoryBitMask = 1
+        scene.rootNode.addChildNode(moveOrderMarkerNode)
         let undergroundNode = Underground.makeLayer(mapWidth: mapWidth, mapLength: mapHeight)
         scene.rootNode.addChildNode(undergroundNode)
         coord.undergroundNode = undergroundNode
@@ -2270,6 +3049,7 @@ struct SceneKitMapView: NSViewRepresentable {
         coord.pivotIndicatorNode = pivotIndicator
         coord.wallLinePreviewNode = wallLinePreviewNode
         coord.groundMarkNode = groundMarkNode
+        coord.moveOrderMarkerNode = moveOrderMarkerNode
         coord.mapRows = rows
         coord.mapCols = cols
         setupPlacementTemplatesAndGhosts(coord: coord, scene: scene, loader: loader)
@@ -2488,6 +3268,11 @@ struct SceneKitMapView: NSViewRepresentable {
             s.tiltAngle = min(MapCameraSettings.tiltMax, max(MapCameraSettings.tiltMin, s.tiltAngle + signed))
             gameState.setMapCameraSettingsSilent(s)
         }
+        container.onToggleTopDown = { [gameState] in
+            var s = gameState.mapCameraSettings
+            s.isTopDown.toggle()
+            gameState.setMapCameraSettingsSilent(s)
+        }
         container.onRotationDelta = { [gameState] delta in
             var s = gameState.mapCameraSettings
             s.mapRotation += delta
@@ -2539,7 +3324,9 @@ struct SceneKitMapView: NSViewRepresentable {
                     DispatchQueue.main.async { gameState.inspectPlacement(placement) }
                     return
                 }
-                if gameState.markedPeople.contains(where: { gameState.people.person(id: $0.id)?.canBeMarked == true }) {
+                if gameState.markedPeople.contains(where: {
+                    $0.isKing || gameState.people.person(id: $0.id)?.canBeMarked == true
+                }) {
                     DispatchQueue.main.async { gameState.sendMarkedSoldiers(row: row, col: col) }
                     return
                 }
@@ -2584,6 +3371,8 @@ struct SceneKitMapView: NSViewRepresentable {
         coord.terrainPaintSeaPreview = terrainPaintSeaPreview
         container.isTerrainEditMode = isTerrainEditMode
         wireTerrainPaintDrag(container: container, coord: coord, gameState: gameState)
+        wireSeaHandleDrag(container: container, coord: coord, gameState: gameState)
+        wireRiverHandleDrag(container: container, coord: coord, gameState: gameState)
         container.onVertexDotSelected = { [onVertexDotSelected] vr, vc in
             DispatchQueue.main.async { onVertexDotSelected?(vr, vc) }
         }
@@ -2605,6 +3394,182 @@ struct SceneKitMapView: NSViewRepresentable {
         applyUndergroundMode(container: container, coord: coord)
 
         return container
+    }
+
+    /// Kontrolne točke mora: vrhovi (drag) + mid (klik = split).
+    /// Za vrijeme draga samo mijenjamo pozicije čvorova (bez punog rebuilda → bez kašnjenja).
+    private func wireSeaHandleDrag(container: SceneKitMapNSView, coord: Coordinator, gameState: GameState) {
+        let draftActive = gameState.mapEditorState?.seaSurfaceDraft != nil
+        container.seaHandleEditing = draftActive
+        container.mapRows = coord.mapRows
+        container.mapCols = coord.mapCols
+
+        func fullRefresh(_ draft: SeaSurfaceDraft, coord: Coordinator) {
+            guard let overlay = coord.cellSelectionOverlayNode else { return }
+            refreshCellSelectionOverlay(
+                overlayNode: overlay,
+                selectedCells: [],
+                gameMap: gameState.gameMap,
+                rows: coord.mapRows,
+                cols: coord.mapCols,
+                seaPreview: true,
+                seaDraft: draft
+            )
+        }
+
+        /// Live update: plavo + zeleni obrub + točke zajedno (žuti vanjski ostaje).
+        func liveMoveInner(_ draft: SeaSurfaceDraft, coord: Coordinator) {
+            guard let overlay = coord.cellSelectionOverlayNode else { return }
+            let halfW = effectiveMapWorldW(cols: coord.mapCols) / 2
+            let halfH = effectiveMapWorldH(rows: coord.mapRows) / 2
+            let step = worldUnitsPerCell
+            let rimY: CGFloat = {
+                if let h = overlay.childNode(withName: "seaH_vertex_0", recursively: true) {
+                    return CGFloat(h.position.y)
+                }
+                return 0.4
+            }()
+            let fillY = rimY - 0.09
+            for child in overlay.childNodes {
+                let n = child.name ?? ""
+                if n == "seaDraftEdge" || n == "seaDraftWater" || n.hasPrefix("seaH_") || n.hasPrefix("seaDraftWater") {
+                    child.removeFromParentNode()
+                }
+            }
+            let outline = draft.innerOutlinePoints()
+            var fillVerts: [SCNVector3] = []
+            var rimVerts: [SCNVector3] = []
+            for pt in outline {
+                let x = pt.col * step - halfW
+                let z = pt.row * step - halfH
+                fillVerts.append(SCNVector3(x, fillY, z))
+                rimVerts.append(SCNVector3(x, rimY, z))
+            }
+            addSeaDraftPolygonFill(to: overlay, vertices: fillVerts)
+            let lineThickness = max(step * 0.07, 0.4)
+            for i in 0..<rimVerts.count {
+                addSeaDraftEdgeLine(
+                    to: overlay,
+                    from: rimVerts[i],
+                    to: rimVerts[(i + 1) % rimVerts.count],
+                    thickness: lineThickness
+                )
+            }
+            addSeaSurfaceHandles(
+                to: overlay,
+                draft: draft,
+                y: rimY,
+                halfW: halfW,
+                halfH: halfH,
+                step: step
+            )
+        }
+
+        container.onSeaMidSplit = { [weak coord, gameState] edgeIndex in
+            guard let coord else { return }
+            var draft = coord.seaDraftLive ?? gameState.mapEditorState?.seaSurfaceDraft
+            guard var draft else { return }
+            draft.splitEdge(at: edgeIndex)
+            coord.seaDraftLive = draft
+            fullRefresh(draft, coord: coord)
+            let final = draft
+            DispatchQueue.main.async {
+                gameState.commitSeaSurfaceDraft(final)
+                coord.seaDraftLive = nil
+            }
+        }
+
+        container.onSeaVertexDrag = { [weak coord, gameState] index, row, col, ended in
+            guard let coord else { return }
+            var draft = coord.seaDraftLive ?? gameState.mapEditorState?.seaSurfaceDraft
+            guard var draft else { return }
+            if row.isFinite, col.isFinite {
+                draft.moveVertex(index: index, row: row, col: col)
+            }
+            coord.seaDraftLive = draft
+            if ended {
+                fullRefresh(draft, coord: coord)
+                let final = draft
+                DispatchQueue.main.async {
+                    gameState.commitSeaSurfaceDraft(final)
+                    coord.seaDraftLive = nil
+                }
+            } else {
+                liveMoveInner(draft, coord: coord)
+            }
+        }
+    }
+
+    /// Kontrolne točke rijeke: vrhovi (drag) + mid (klik = split).
+    private func wireRiverHandleDrag(container: SceneKitMapNSView, coord: Coordinator, gameState: GameState) {
+        let draftActive = gameState.mapEditorState?.riverPathDraft != nil
+        container.riverHandleEditing = draftActive
+        container.mapRows = coord.mapRows
+        container.mapCols = coord.mapCols
+
+        func fullRefresh(_ draft: RiverPathDraft, coord: Coordinator) {
+            guard let overlay = coord.cellSelectionOverlayNode else { return }
+            refreshCellSelectionOverlay(
+                overlayNode: overlay,
+                selectedCells: [],
+                gameMap: gameState.gameMap,
+                rows: coord.mapRows,
+                cols: coord.mapCols,
+                riverDraft: draft
+            )
+        }
+
+        /// Live: traka + crta + točke bez GameState publish.
+        func liveRefresh(_ draft: RiverPathDraft, coord: Coordinator) {
+            guard let overlay = coord.cellSelectionOverlayNode else { return }
+            for child in overlay.childNodes {
+                let n = child.name ?? ""
+                if n == "riverDraftRibbon" || n == "riverDraftEdge" || n.hasPrefix("rivH_") {
+                    child.removeFromParentNode()
+                }
+            }
+            addRiverPathDraftOverlay(
+                to: overlay,
+                draft: draft,
+                gameMap: gameState.gameMap,
+                rows: coord.mapRows,
+                cols: coord.mapCols
+            )
+        }
+
+        container.onRiverMidSplit = { [weak coord, gameState] segmentIndex in
+            guard let coord else { return }
+            var draft = coord.riverDraftLive ?? gameState.mapEditorState?.riverPathDraft
+            guard var draft else { return }
+            draft.splitSegment(at: segmentIndex)
+            coord.riverDraftLive = draft
+            fullRefresh(draft, coord: coord)
+            let final = draft
+            DispatchQueue.main.async {
+                gameState.commitRiverPathDraft(final)
+                coord.riverDraftLive = nil
+            }
+        }
+
+        container.onRiverVertexDrag = { [weak coord, gameState] index, row, col, ended in
+            guard let coord else { return }
+            var draft = coord.riverDraftLive ?? gameState.mapEditorState?.riverPathDraft
+            guard var draft else { return }
+            if row.isFinite, col.isFinite {
+                draft.moveVertex(index: index, row: row, col: col)
+            }
+            coord.riverDraftLive = draft
+            if ended {
+                fullRefresh(draft, coord: coord)
+                let final = draft
+                DispatchQueue.main.async {
+                    gameState.commitRiverPathDraft(final)
+                    coord.riverDraftLive = nil
+                }
+            } else {
+                liveRefresh(draft, coord: coord)
+            }
+        }
     }
 
     /// Click-drag preview: samo SceneKit overlay (bez GameState publish → nema SwiftUI reentrancy).
@@ -2651,6 +3616,8 @@ struct SceneKitMapView: NSViewRepresentable {
         coord.terrainPaintSeaPreview = terrainPaintSeaPreview
         container.isTerrainEditMode = isTerrainEditMode
         wireTerrainPaintDrag(container: container, coord: coord, gameState: gameState)
+        wireSeaHandleDrag(container: container, coord: coord, gameState: gameState)
+        wireRiverHandleDrag(container: container, coord: coord, gameState: gameState)
         container.onVertexDotSelected = { [onVertexDotSelected] vr, vc in
             DispatchQueue.main.async { onVertexDotSelected?(vr, vc) }
         }
@@ -2679,16 +3646,7 @@ struct SceneKitMapView: NSViewRepresentable {
             applyRenderQuality(to: scnView, gameState: gameState)
         }
         bindGroundMark(container: container, coord: coord)
-        if !container.isMarkFollowing, let mark = gameState.groundMark {
-            refreshGroundMark(
-                coord.groundMarkNode,
-                origin: (mark.originRow, mark.originCol),
-                far: (mark.farRow, mark.farCol),
-                rows: coord.mapRows,
-                cols: coord.mapCols,
-                gameMap: gameState.gameMap
-            )
-        }
+        // Zelena ploha samo dok traje nacrt; committed oznaka se ne crta ponovo.
         applyGroundwaterOverlay(coord: coord)
         applyEditorCellOverlay(coord: coord)
         applyBuildPadOverlay(coord: coord)
@@ -2709,17 +3667,18 @@ struct SceneKitMapView: NSViewRepresentable {
 
         // Mapa (rootNode, teren, grid, placements) se NIKAD ne dira – samo kamera i target.
 
-        // Odmah primijeni kameru (pan, rotacija) kad se stanje promijeni iz UI (npr. klik na kompas); zoom ostaje glatko u delegateu.
+        // Odmah primijeni kameru (pan, rotacija) kad se stanje promijeni iz UI (npr. klik na kompas); zoom/orbit ostaju glatko u delegateu.
         if let cam = coord.cameraNode, let target = coord.cameraTarget {
             let s = gameState.mapCameraSettings
             let h = Self.cameraBaseHeight / coord.animatedZoom
             let r = CGFloat(-s.mapRotation)
             let depth = coord.animatedDepth
+            let orbit = h * (0.02 + 0.98 * coord.animatedOrbitFactor)
             target.position = SCNVector3(s.panOffset.x, depth, s.panOffset.y)
             cam.position = SCNVector3(
-                s.panOffset.x + sin(r) * h,
+                s.panOffset.x + sin(r) * orbit,
                 h + depth,
-                s.panOffset.y + cos(r) * h
+                s.panOffset.y + cos(r) * orbit
             )
         }
 
@@ -2842,12 +3801,23 @@ struct SceneKitMapView: NSViewRepresentable {
                 newGeo.materials = [oldMat]
             }
             terrain.geometry = newGeo
-            // SeaBasin.attach(to: terrain, gameMap: gameState.gameMap) — kasnije, kad editor mora crta korito/vodu.
+            // Gotovo / commit: korito + Metal voda. Tijekom nacrta ostaje editor overlay.
+            if gameState.mapEditorState?.seaSurfaceDraft == nil {
+                SeaBasin.attach(to: terrain, gameMap: gameState.gameMap)
+            } else {
+                terrain.childNode(withName: "seaBasin", recursively: false)?.removeFromParentNode()
+            }
         }
 
         // Map Editor – overlay: dok traje drag, SceneKit callback već crta preview (ne prepisuj).
         if gameState.isMapEditorMode, let overlayNode = coord.cellSelectionOverlayNode,
-           !container.isTerrainPaintActive {
+           !container.isTerrainPaintActive,
+           !container.isSeaHandleDragging,
+           !container.isRiverHandleDragging,
+           coord.seaDraftLive == nil,
+           coord.riverDraftLive == nil {
+            let draft = gameState.mapEditorState?.seaSurfaceDraft
+            let riverDraft = gameState.mapEditorState?.riverPathDraft
             let seaCells = gameState.mapEditorState?.editingSeaCells ?? []
             let selected = coord.terrainPaintPreviewCells
                 ?? (!seaCells.isEmpty ? seaCells : nil)
@@ -2855,13 +3825,16 @@ struct SceneKitMapView: NSViewRepresentable {
                 ?? []
             let seaHighlight = coord.terrainPaintSeaPreview
                 || (gameState.mapEditorState?.isSeaEditorActive == true)
+                || draft != nil
             refreshCellSelectionOverlay(
                 overlayNode: overlayNode,
                 selectedCells: selected,
                 gameMap: gameState.gameMap,
                 rows: coord.mapRows,
                 cols: coord.mapCols,
-                seaPreview: seaHighlight
+                seaPreview: seaHighlight,
+                seaDraft: draft,
+                riverDraft: riverDraft
             )
         }
 
@@ -2897,13 +3870,13 @@ struct SceneKitMapView: NSViewRepresentable {
     }
 
     /// Samo kamera i target se pomiču. Mapa se NIKAD ne dira.
-    /// Kamera: orbita na visini h, radius h, uvijek gleda pivot; 4 strane = puni krug 360°.
+    /// Kamera: orbita na visini h (kosi) ili radius 0 (odozgo / nacrt); uvijek gleda pivot.
     private func applyCamera(cameraNode: SCNNode, targetNode: SCNNode, settings: MapCameraSettings) {
         let h = Self.cameraBaseHeight / settings.currentZoom
         let px = settings.panOffset.x
         let pz = settings.panOffset.y
         let rot = CGFloat(-settings.mapRotation)
-        let orbitRadius = h
+        let orbitRadius = h * (settings.isTopDown ? 0.02 : 1)
         targetNode.position = SCNVector3(px, 0, pz)
         cameraNode.position = SCNVector3(
             px + sin(rot) * orbitRadius,
@@ -3538,6 +4511,20 @@ struct SceneKitMapView: NSViewRepresentable {
             ghostNode.childNodes.forEach { $0.categoryBitMask = 0 }
             applyTransparencyRecursive(0.6, to: ghostNode)
             return (templateContainer, ghostNode)
+        } else if TowerKind.isTower(config.objectId) {
+            // Jednoliki scale — okrugla ostaje krug, kvadratna kvadrat (ne elipsa/kocka).
+            let target = CGFloat(max(config.cellW, config.cellH)) * worldUnitsPerCell
+            let source = max(dx, dz)
+            let sc = target / max(source, 0.1)
+            placementNode.scale = SCNVector3(sc, sc, sc)
+            let ghostNode = templateContainer.clone()
+            duplicateMaterialsRecursive(ghostNode)
+            ghostNode.name = "ghost_\(config.objectId)"
+            ghostNode.isHidden = true
+            ghostNode.categoryBitMask = 0
+            ghostNode.childNodes.forEach { $0.categoryBitMask = 0 }
+            applyTransparencyRecursive(0.6, to: ghostNode)
+            return (templateContainer, ghostNode)
         } else {
             scaleY = min(scaleX, scaleZ)
         }
@@ -3734,6 +4721,7 @@ struct SceneKitMapView: NSViewRepresentable {
 
     private func bindGroundMark(container: SceneKitMapNSView, coord: Coordinator) {
         container.onGroundMarkPreview = { [gameState] pair in
+            // Zelena ploha samo dok se vuče / crtа oznaka.
             refreshGroundMark(
                 coord.groundMarkNode,
                 origin: pair?.0,
@@ -3753,16 +4741,17 @@ struct SceneKitMapView: NSViewRepresentable {
                     gameState.groundMark = mark
                     gameState.markedPeople = gameState.people(inside: mark)
                 } else {
+                    // Samo makni zeleni preview; označene osobe ostaju do cancel / novog nacrta.
                     gameState.groundMark = nil
-                    gameState.markedPeople = []
                 }
             }
         }
         container.onGroundMarkCommit = { [gameState] origin, far in
+            // Gotovo: zelena nestaje, ostaju samo označene osobe.
             refreshGroundMark(
                 coord.groundMarkNode,
-                origin: origin,
-                far: far,
+                origin: nil,
+                far: nil,
                 rows: coord.mapRows,
                 cols: coord.mapCols,
                 gameMap: gameState.gameMap
@@ -3774,7 +4763,7 @@ struct SceneKitMapView: NSViewRepresentable {
                     farRow: far.row,
                     farCol: far.col
                 )
-                gameState.groundMark = mark
+                gameState.groundMark = nil
                 gameState.markedPeople = gameState.people(inside: mark)
             }
         }
@@ -3782,6 +4771,14 @@ struct SceneKitMapView: NSViewRepresentable {
             DispatchQueue.main.async {
                 gameState.groundMark = nil
                 gameState.markedPeople = []
+                gameState.moveOrderMarker = nil
+            }
+        }
+        container.onGroundMarkCancelled = { [gameState] in
+            DispatchQueue.main.async {
+                gameState.groundMark = nil
+                gameState.markedPeople = []
+                gameState.moveOrderMarker = nil
             }
         }
         let enabled = !gameState.isMapEditorMode
@@ -3791,7 +4788,9 @@ struct SceneKitMapView: NSViewRepresentable {
             && !isCellSelectionMode
         container.setGroundMarkEnabled(enabled)
         container.hasMarkedSoldiers = { [gameState] in
-            gameState.markedPeople.contains { gameState.people.person(id: $0.id)?.canBeMarked == true }
+            gameState.markedPeople.contains {
+                $0.isKing || gameState.people.person(id: $0.id)?.canBeMarked == true
+            }
         }
         container.onMoveOrder = { [gameState] row, col in
             DispatchQueue.main.async {
@@ -3850,6 +4849,8 @@ struct SceneKitMapView: NSViewRepresentable {
         var gridNode40: SCNNode?
         var wallLinePreviewNode: SCNNode?
         var groundMarkNode: SCNNode?
+        var moveOrderMarkerNode: SCNNode?
+        var lastMoveOrderMarkerKey: String?
         var undergroundNode: SCNNode?
         var lastUnderground: Bool?
         var surfacePlacementsNode: SCNNode?
@@ -3874,6 +4875,10 @@ struct SceneKitMapView: NSViewRepresentable {
         var terrainPaintSeaPreview: Bool = false
         /// Live click-drag preview (SceneKit-only, bez GameState publish).
         var terrainPaintPreviewCells: Set<MapCoordinate>?
+        /// Live nacrt mora dok se vuče kontrolna točka.
+        var seaDraftLive: SeaSurfaceDraft?
+        /// Live nacrt rijeke dok se vuče / dijeli točka.
+        var riverDraftLive: RiverPathDraft?
         var terrainBrushOption: TerrainBrushOption?
         /// Map Editor – zelena površina na terenu za područje pod mišem (bez letećeg elementa).
         var brushPreviewOverlayNode: SCNNode?
@@ -3891,6 +4896,8 @@ struct SceneKitMapView: NSViewRepresentable {
         weak var gameState: GameState?
         /// Glatka animacija: interpolira se prema target zoomu (iz gameState).
         var animatedZoom: CGFloat = 8
+        /// 1 = kosi orbit, 0 = odozgo (nacrt). Lerp prema isTopDown.
+        var animatedOrbitFactor: CGFloat = 1
         /// Broj placements pri zadnjem updateNSView – da se osvježi prikaz kad korisnik postavi objekt.
         var lastPlacementsCount: Int = -1
         var lastPlacementsVersion: Int = -1
@@ -3906,22 +4913,28 @@ struct SceneKitMapView: NSViewRepresentable {
             let pan: CGPoint
             let rot: CGFloat
             let targetDepth: CGFloat
+            let targetOrbit: CGFloat
             if let gs = gameState {
                 targetZoom = gs.mapCameraSettings.currentZoom
                 pan = gs.mapCameraSettings.panOffset
                 rot = gs.mapCameraSettings.mapRotation
                 targetDepth = 0
+                targetOrbit = gs.mapCameraSettings.isTopDown ? 0 : 1
             } else {
                 targetZoom = animatedZoom
                 pan = .zero
                 rot = .pi
                 targetDepth = 0
+                targetOrbit = 1
             }
             animatedZoom += (targetZoom - animatedZoom) * SceneKitMapView.zoomLerpFactor
             let depthStep = targetDepth - animatedDepth
             animatedDepth = abs(depthStep) < 0.01 ? targetDepth : animatedDepth + depthStep * 0.07
+            animatedOrbitFactor += (targetOrbit - animatedOrbitFactor) * 0.14
+            if abs(targetOrbit - animatedOrbitFactor) < 0.002 { animatedOrbitFactor = targetOrbit }
             let h = SceneKitMapView.cameraBaseHeight / animatedZoom
-            let orbitRadius = h
+            // Maleni horizontalni ostatak (~2 %) sprječava gimbal lock lookAt kad je odozgo.
+            let orbitRadius = h * (0.02 + 0.98 * animatedOrbitFactor)
             let r = CGFloat(-rot)
             target.position = SCNVector3(pan.x, animatedDepth, pan.y)
             cam.position = SCNVector3(
@@ -3945,10 +4958,40 @@ struct SceneKitMapView: NSViewRepresentable {
                 }
             }
             if let gs = gameState, let seats = seatsNode {
-                syncRealmSeats(on: seats, snapshots: gs.realmSeats.copySnapshots(), rings: gs.populationRing.copySnapshots(), rows: mapRows, cols: mapCols, gameMap: gs.gameMap)
+                let markedKing = Set(gs.markedPeople.filter(\.isKing).compactMap { mark -> String? in
+                    let id = mark.id
+                    guard id.hasPrefix("king:") else { return nil }
+                    return String(id.dropFirst(5))
+                })
+                syncRealmSeats(
+                    on: seats,
+                    snapshots: gs.realmSeats.copySnapshots(),
+                    rings: gs.populationRing.copySnapshots(),
+                    rows: mapRows,
+                    cols: mapCols,
+                    gameMap: gs.gameMap,
+                    markedKingFactionIds: markedKing
+                )
             }
             if let gs = gameState, let peopleNode {
-                syncPeople(on: peopleNode, snapshots: gs.people.copySnapshots(), rows: mapRows, cols: mapCols, viewUnderground: gs.isUndergroundView, gameMap: gs.gameMap)
+                let markedIds = Set(gs.markedPeople.map(\.id))
+                let snaps = gs.people.copySnapshots().map { snap -> PersonRenderSnapshot in
+                    var copy = snap
+                    copy.marked = markedIds.contains(snap.id)
+                    return copy
+                }
+                syncPeople(on: peopleNode, snapshots: snaps, rows: mapRows, cols: mapCols, viewUnderground: gs.isUndergroundView, gameMap: gs.gameMap)
+            }
+            if let gs = gameState {
+                refreshMoveOrderMarker(
+                    moveOrderMarkerNode,
+                    marker: gs.moveOrderMarker,
+                    viewUnderground: gs.isUndergroundView,
+                    rows: mapRows,
+                    cols: mapCols,
+                    gameMap: gs.gameMap,
+                    lastKey: &lastMoveOrderMarkerKey
+                )
             }
             if let gs = gameState, let transportNode {
                 syncTransport(on: transportNode, lines: gs.transportLines, oxen: gs.oxen.copySnapshots(),

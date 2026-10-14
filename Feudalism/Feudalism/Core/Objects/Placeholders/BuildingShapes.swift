@@ -447,6 +447,30 @@ enum BuildingShapes {
         return root
     }
 
+    /// Kamena rešetka s otvorom — svjetlo u podzemlje.
+    static func undergroundLightOpening() -> SCNNode {
+        let root = named("underground_light_opening")
+        k.box(to: root, 1.0 * s, 0.16 * s, 1.0 * s, k.stoneDark, at: SCNVector3(0, 0.08 * s, 0))
+        k.box(to: root, 0.72 * s, 0.06 * s, 0.72 * s, NSColor(white: 0.08, alpha: 1), at: SCNVector3(0, 0.14 * s, 0))
+        // Rešetka
+        for x in [-0.18, 0.18] {
+            k.box(to: root, 0.06 * s, 0.08 * s, 0.68 * s, k.iron, at: SCNVector3(x * s, 0.20 * s, 0))
+        }
+        for z in [-0.18, 0.18] {
+            k.box(to: root, 0.68 * s, 0.08 * s, 0.06 * s, k.iron, at: SCNVector3(0, 0.20 * s, z * s))
+        }
+        let glow = k.cylinder(
+            to: root,
+            radius: 0.28 * s,
+            height: 0.04 * s,
+            color: NSColor(red: 1, green: 0.88, blue: 0.55, alpha: 0.85),
+            at: SCNVector3(0, 0.17 * s, 0),
+            segments: 12
+        )
+        glow.geometry?.firstMaterial?.emission.contents = NSColor(red: 1, green: 0.82, blue: 0.4, alpha: 1)
+        return root
+    }
+
     // MARK: - Katalog (nema SceneKit tipa)
 
     static func catalogFallback(name: String) -> SCNNode? {
@@ -454,9 +478,17 @@ enum BuildingShapes {
         case "Skladište": return lager()
         case "Silos": return granary()
         case "Baraka": return training()
-        case "Kula": return tower()
+        case "Kula", "Visoka uska okrugla": return tower(kind: .roundTall)
+        case "Niska kvadratna mala": return tower(kind: .squareSmall)
+        case "Srednja kvadratna": return tower(kind: .squareMedium)
+        case "Velika kvadratna": return tower(kind: .squareLarge)
+        case "Velika okrugla": return tower(kind: .roundLarge)
         case "Cesta": return InfrastructureShapes.road()
+        case "Podloga", "Kamena ploča": return InfrastructureShapes.stoneSlab()
         case "Most": return InfrastructureShapes.bridge()
+        case "Kanal": return InfrastructureShapes.canal()
+        case "Rijeka": return InfrastructureShapes.river()
+        case "Svjetlosni otvor": return undergroundLightOpening()
         case "Crkva", "Samostan": return church()
         case "Zidine": return wallStub()
         case "Zlato": return pile(NSColor(red: 0.82, green: 0.68, blue: 0.22, alpha: 1))
@@ -468,12 +500,62 @@ enum BuildingShapes {
         }
     }
 
-    static func tower() -> SCNNode {
-        let root = named("tower")
-        k.cylinder(to: root, radius: 1.15 * s, height: 6.4 * s, color: k.stone, at: SCNVector3(0, 3.2 * s, 0), segments: 10)
-        k.cone(to: root, top: 0, bottom: 1.45 * s, height: 1.6 * s, color: k.roofTile, at: SCNVector3(0, 7.2 * s, 0))
-        k.box(to: root, 0.45 * s, 1.15 * s, 0.08 * s, k.door, at: SCNVector3(0, 0.62 * s, 1.18 * s))
+    static func tower(kind: TowerKind = .roundTall) -> SCNNode {
+        let root = named(kind.objectId)
+        switch kind {
+        case .roundTall:
+            // Visoka uska okrugla — čisti cilindar, bez kockastog postolja.
+            let r: CGFloat = 0.42 * s
+            let h: CGFloat = 8.4 * s
+            k.cylinder(to: root, radius: r, height: h, color: k.stone, at: SCNVector3(0, h * 0.5, 0), segments: 24)
+            k.cylinder(to: root, radius: r * 1.12, height: 0.35 * s, color: k.stoneDark, at: SCNVector3(0, h + 0.1 * s, 0), segments: 24)
+            k.cone(to: root, top: 0, bottom: r * 1.25, height: 1.6 * s, color: k.roofTile, at: SCNVector3(0, h + 0.95 * s, 0))
+            // Urez vrata u plaštu (ne širi bbox previše).
+            k.box(to: root, 0.22 * s, 0.85 * s, 0.05 * s, k.door, at: SCNVector3(0, 0.48 * s, r - 0.01 * s))
+        case .squareSmall:
+            // Niska kvadratna — jasan kvadratni tlocrt, nije kocka.
+            let w: CGFloat = 0.95 * s
+            let h: CGFloat = 3.6 * s
+            k.box(to: root, w, h, w, k.stone, at: SCNVector3(0, h * 0.5, 0))
+            addSquareBattlements(to: root, half: w * 0.5, y: h, size: 0.22 * s, rise: 0.35 * s)
+            k.box(to: root, 0.28 * s, 0.75 * s, 0.05 * s, k.door, at: SCNVector3(0, 0.42 * s, w * 0.5 - 0.01 * s))
+        case .squareMedium:
+            let w: CGFloat = 1.7 * s
+            let h: CGFloat = 5.2 * s
+            k.box(to: root, w, h, w, k.stone, at: SCNVector3(0, h * 0.5, 0))
+            addSquareBattlements(to: root, half: w * 0.5, y: h, size: 0.28 * s, rise: 0.42 * s)
+            k.box(to: root, 0.4 * s, 1.05 * s, 0.06 * s, k.door, at: SCNVector3(0, 0.55 * s, w * 0.5 - 0.01 * s))
+        case .squareLarge:
+            let w: CGFloat = 2.5 * s
+            let h: CGFloat = 6.6 * s
+            k.box(to: root, w, h, w, k.stone, at: SCNVector3(0, h * 0.5, 0))
+            addSquareBattlements(to: root, half: w * 0.5, y: h, size: 0.36 * s, rise: 0.5 * s)
+            // Središnji krov iznad dvorišta na vrhu.
+            k.box(to: root, w * 0.55, 0.9 * s, w * 0.55, k.stoneDark, at: SCNVector3(0, h + 0.55 * s, 0))
+            k.roof(to: root, width: w * 0.65, length: w * 0.65, height: 0.85 * s, color: k.roofTile, y: h + 1.0 * s)
+            k.box(to: root, 0.5 * s, 1.25 * s, 0.08 * s, k.door, at: SCNVector3(0, 0.68 * s, w * 0.5 - 0.01 * s))
+        case .roundLarge:
+            // Debeli okrugli toranj — puno segmenata da se ne čita kao kocka.
+            let r: CGFloat = 1.35 * s
+            let h: CGFloat = 7.2 * s
+            k.cylinder(to: root, radius: r, height: h, color: k.stone, at: SCNVector3(0, h * 0.5, 0), segments: 28)
+            k.cylinder(to: root, radius: r * 1.08, height: 0.45 * s, color: k.stoneDark, at: SCNVector3(0, h + 0.15 * s, 0), segments: 28)
+            k.cone(to: root, top: 0, bottom: r * 1.2, height: 2.1 * s, color: k.roofTile, at: SCNVector3(0, h + 1.2 * s, 0))
+            k.box(to: root, 0.48 * s, 1.3 * s, 0.06 * s, k.door, at: SCNVector3(0, 0.7 * s, r - 0.01 * s))
+        }
         return root
+    }
+
+    /// Zubci na kvadratnoj kuli (čita se kao kvadrat, ne kao kocka).
+    private static func addSquareBattlements(to root: SCNNode, half: CGFloat, y: CGFloat, size: CGFloat, rise: CGFloat) {
+        let inset = half - size * 0.55
+        let positions: [(CGFloat, CGFloat)] = [
+            (-inset, -inset), (inset, -inset), (-inset, inset), (inset, inset),
+            (0, -inset), (0, inset), (-inset, 0), (inset, 0)
+        ]
+        for p in positions {
+            k.box(to: root, size, rise, size, k.stoneDark, at: SCNVector3(p.0, y + rise * 0.5, p.1))
+        }
     }
 
     static func road() -> SCNNode {

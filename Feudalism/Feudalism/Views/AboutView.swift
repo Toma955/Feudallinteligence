@@ -313,7 +313,7 @@ struct AboutView: View {
             return LocalizedStrings.string(for: "about_pad_kamen", language: language)
         case .zeljezo:
             return LocalizedStrings.string(for: "about_pad_zeljezo", language: language)
-        case .voda:
+        case .rijeka:
             return LocalizedStrings.string(for: "about_pad_rijeka", language: language)
         case .jezero:
             return LocalizedStrings.string(for: "about_pad_rijeka", language: language)

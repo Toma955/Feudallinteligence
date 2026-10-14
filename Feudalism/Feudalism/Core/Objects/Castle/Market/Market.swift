@@ -74,9 +74,10 @@ extension GameState {
         return (buy, max(1, buy - 1))
     }
 
-    func marketBuy(_ good: Good) {
-        guard marketIsWorking(), let quote = tradeQuote(good), resources.gold >= quote.buy else { return }
-        guard let faction = playerSeat?.id, unitsThatFit(good, adding: 1, faction: faction) >= 1 else {
+    func marketBuy(_ good: Good, faction: String? = nil) {
+        let faction = faction ?? playerSeat?.id
+        guard marketIsWorking(of: faction), let quote = tradeQuote(good), resources.gold >= quote.buy else { return }
+        guard let faction, unitsThatFit(good, adding: 1, faction: faction) >= 1 else {
             postHUD(.resources, "Nema slobodnog mjesta u skladištu.")
             return
         }
@@ -84,8 +85,9 @@ extension GameState {
         addGood(good, 1)
     }
 
-    func marketSell(_ good: Good) {
-        guard marketIsWorking(), let quote = tradeQuote(good), goodAmount(good) >= 1 else { return }
+    func marketSell(_ good: Good, faction: String? = nil) {
+        let faction = faction ?? playerSeat?.id
+        guard marketIsWorking(of: faction), let quote = tradeQuote(good), goodAmount(good) >= 1 else { return }
         addGood(good, -1)
         resources.add(gold: quote.sell)
     }

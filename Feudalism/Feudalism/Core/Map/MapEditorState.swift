@@ -24,17 +24,30 @@ struct MapEditorUndoAction {
     }
 }
 
-/// Alat unutar editora jednog mora (kasnije: zidovi, obala, voda…).
+/// Alat unutar editora mora (kasnije: zidovi, obala, voda…).
 enum SeaEditorTool: String, CaseIterable, Identifiable {
-    case povrsina = "Površina mora"
+    case povrsina = "Površina"
+    case dubina = "Dubina"
 
     var id: String { rawValue }
 
     var systemImage: String {
         switch self {
         case .povrsina: return "rectangle.dashed"
+        case .dubina: return "arrow.down.to.line"
         }
     }
+}
+
+/// Predodređene dubine mora (metri) za četkicu Dubina.
+enum SeaDepthPreset: CGFloat, CaseIterable, Identifiable {
+    case m1 = 1
+    case m2 = 2
+    case m5 = 5
+    case m10 = 10
+
+    var id: CGFloat { rawValue }
+    var label: String { "\(Int(rawValue)) m" }
 }
 
 /// Stanje koje se generira na mapi kad se uključi editor mode – linka se na GameMap.
@@ -63,6 +76,12 @@ final class MapEditorState: ObservableObject {
     @Published var editingSeaCells: Set<MapCoordinate> = []
     /// Odabrani alat u editoru mora.
     @Published var seaEditorTool: SeaEditorTool?
+    /// Nacrt površine mora: vanjski fiksni, unutarnji se pomiče / naginje / krivi.
+    @Published var seaSurfaceDraft: SeaSurfaceDraft?
+    /// Nacrt linije vode (rijeka / jezero / močvara): točke, mid-split, krivulja, širina.
+    @Published var riverPathDraft: RiverPathDraft?
+    /// Ćelije koje je trenutni nacrt obojao (za čišćenje pri pomaku).
+    var riverPathPaintedCells: Set<MapCoordinate> = []
 
     /// Undo stog – globalno po editoru, ne po tileu.
     @Published private(set) var undoStack: [MapEditorUndoAction] = []
@@ -123,6 +142,8 @@ final class MapEditorState: ObservableObject {
         tempHeightDelta = 0
         paintMask = []
         exitSeaEditor()
+        clearSeaSurfaceDraft()
+        clearRiverPathDraft()
         undoStack.removeAll()
         redoStack.removeAll()
     }
@@ -132,4 +153,16 @@ final class MapEditorState: ObservableObject {
         editingSeaCells = []
         seaEditorTool = nil
     }
+
+    func clearSeaSurfaceDraft() {
+        seaSurfaceDraft = nil
+    }
+
+    func clearRiverPathDraft() {
+        riverPathDraft = nil
+        riverPathPaintedCells = []
+    }
+
+    var isSeaSurfaceDraftActive: Bool { seaSurfaceDraft != nil }
+    var isRiverPathDraftActive: Bool { riverPathDraft != nil }
 }

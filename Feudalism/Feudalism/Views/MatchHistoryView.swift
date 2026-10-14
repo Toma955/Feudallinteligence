@@ -14,6 +14,8 @@ struct MatchHistoryView: View {
     @State private var search = ""
     @State private var selectedId: String?
     @State private var loaded: MatchHistoryRecord?
+    @State private var pendingDelete: MatchHistorySummary?
+    @State private var infoSummary: MatchHistorySummary?
     @ObservedObject var playback: RecordingPlayback = .shared
 
     private var language: AppLanguage { gameState.appLanguage }
@@ -22,7 +24,7 @@ struct MatchHistoryView: View {
         HStack(alignment: .top, spacing: 14) {
             if playback.showMatchList {
                 matchListPanel
-                    .frame(width: 340)
+                    .frame(width: 360)
                     .frame(maxHeight: .infinity)
             }
             rightColumn
@@ -36,6 +38,27 @@ struct MatchHistoryView: View {
         }
         .onChange(of: selectedId) { _ in
             loadSelected()
+        }
+        .alert(L("history_delete_title"), isPresented: Binding(
+            get: { pendingDelete != nil },
+            set: { if !$0 { pendingDelete = nil } }
+        )) {
+            Button(L("history_delete_cancel"), role: .cancel) {
+                pendingDelete = nil
+            }
+            Button(L("history_delete_confirm"), role: .destructive) {
+                if let item = pendingDelete {
+                    deleteMatch(item)
+                    pendingDelete = nil
+                }
+            }
+        } message: {
+            if let item = pendingDelete {
+                Text(String(format: L("history_delete_message"), item.title))
+            }
+        }
+        .sheet(item: $infoSummary) { item in
+            matchInfoSheet(item)
         }
     }
 
@@ -146,41 +169,183 @@ struct MatchHistoryView: View {
 
     private func matchRow(_ item: MatchHistorySummary) -> some View {
         let selected = item.id == selectedId
-        return Button {
-            selectedId = item.id
-        } label: {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(item.title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.95))
-                    .lineLimit(2)
-                Text("\(item.mapLabel) · \(L(item.kind.localeKey))")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.55))
-                HStack(spacing: 6) {
-                    Text(timeLabel(item.startedAt))
-                    Text("·")
-                    Text("\(item.frameCount) \(L("history_frames"))")
-                    if let result = item.result, !result.isEmpty {
+        return HStack(alignment: .top, spacing: 6) {
+            Button {
+                selectedId = item.id
+            } label: {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.95))
+                        .lineLimit(2)
+                    Text("\(item.mapLabel) · \(L(item.kind.localeKey))")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.55))
+                    HStack(spacing: 6) {
+                        Text(timeLabel(item.startedAt))
                         Text("·")
-                        Text(result)
+                        Text("\(item.frameCount) \(L("history_frames"))")
+                        if let result = item.result, !result.isEmpty {
+                            Text("·")
+                            Text(result)
+                        }
                     }
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white.opacity(0.42))
                 }
-                .font(.system(size: 10))
-                .foregroundStyle(.white.opacity(0.42))
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                selected ? Color.green.opacity(0.22) : Color.white.opacity(0.06),
-                in: RoundedRectangle(cornerRadius: 8)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(selected ? Color.green.opacity(0.85) : Color.white.opacity(0.08), lineWidth: selected ? 1.5 : 1)
-            )
+            .buttonStyle(.plain)
+
+            VStack(spacing: 4) {
+                Button {
+                    infoSummary = item
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .frame(width: 28, height: 28)
+                        .background(Color.white.opacity(0.12), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .help(L("history_info"))
+
+                Button {
+                    pendingDelete = item
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.red.opacity(0.9))
+                        .frame(width: 28, height: 28)
+                        .background(Color.white.opacity(0.10), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .help(L("history_delete"))
+            }
+            .padding(.trailing, 6)
+            .padding(.top, 6)
         }
-        .buttonStyle(.plain)
+        .background(
+            selected ? Color.green.opacity(0.22) : Color.white.opacity(0.06),
+            in: RoundedRectangle(cornerRadius: 8)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(selected ? Color.green.opacity(0.85) : Color.white.opacity(0.08), lineWidth: selected ? 1.5 : 1)
+        )
+    }
+
+    private func matchInfoSheet(_ item: MatchHistorySummary) -> some View {
+        let record = store.record(id: item.id)
+        let duration = durationLabel(started: item.startedAt, ended: item.endedAt ?? record?.endedAt)
+        let size = store.recordFileSize(id: item.id).map(byteSizeLabel)
+        let players = item.players.map { p in
+            p.isHuman ? "\(p.name) (\(L("history_player_human")))" : "\(p.name) (\(L("history_player_ai")))"
+        }.joined(separator: "\n")
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text(L("history_info_title"))
+                    .font(.system(size: 16, weight: .semibold))
+                Spacer()
+                Button {
+                    infoSummary = nil
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                        .background(Color.primary.opacity(0.08), in: Circle())
+                }
+                .buttonStyle(.plain)
+            }
+            infoRow(L("history_info_name"), item.title)
+            infoRow(L("history_info_kind"), L(item.kind.localeKey))
+            infoRow(L("history_info_map"), item.mapLabel)
+            infoRow(L("history_info_started"), fullDateTimeLabel(item.startedAt))
+            if let ended = item.endedAt ?? record?.endedAt {
+                infoRow(L("history_info_ended"), fullDateTimeLabel(ended))
+            } else {
+                infoRow(L("history_info_ended"), L("history_in_progress"))
+            }
+            infoRow(L("history_info_duration"), duration)
+            infoRow(L("history_info_frames"), "\(item.frameCount)")
+            infoRow(L("history_info_turn"), "\(item.lastTurn)")
+            if let result = item.result, !result.isEmpty {
+                infoRow(L("history_result"), result)
+            }
+            if let size {
+                infoRow(L("history_info_size"), size)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L("history_parties"))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text(players.isEmpty ? "—" : players)
+                    .font(.system(size: 13))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            Button(role: .destructive) {
+                infoSummary = nil
+                pendingDelete = item
+            } label: {
+                Label(L("history_delete"), systemImage: "trash")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
+        }
+        .padding(20)
+        .frame(minWidth: 360, idealWidth: 400, minHeight: 420)
+    }
+
+    private func infoRow(_ title: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 110, alignment: .leading)
+            Text(value)
+                .font(.system(size: 13))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func deleteMatch(_ item: MatchHistorySummary) {
+        let wasSelected = selectedId == item.id
+        store.deleteRecord(id: item.id)
+        if wasSelected {
+            selectedId = store.summaries.first?.id
+            loadSelected()
+        }
+        if infoSummary?.id == item.id {
+            infoSummary = nil
+        }
+    }
+
+    private func fullDateTimeLabel(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: language.rawValue == "hr" ? "hr_HR" : language.rawValue)
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f.string(from: date)
+    }
+
+    private func durationLabel(started: Date, ended: Date?) -> String {
+        guard let ended else { return L("history_in_progress") }
+        let seconds = max(0, Int(ended.timeIntervalSince(started)))
+        let h = seconds / 3600
+        let m = (seconds % 3600) / 60
+        let s = seconds % 60
+        if h > 0 { return String(format: "%d:%02d:%02d", h, m, s) }
+        return String(format: "%d:%02d", m, s)
+    }
+
+    private func byteSizeLabel(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
     }
 
     // MARK: - Desno

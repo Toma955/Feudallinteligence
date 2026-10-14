@@ -70,6 +70,7 @@ enum MapTextureCatalog {
         case .more: return (0.05, 0.20, 0.65)
         case .mocvara: return (0.30, 0.40, 0.25)
         case .voda: return (0.25, 0.60, 1.00)
+        case .obala: return (0.90, 0.78, 0.48)
         }
     }
 

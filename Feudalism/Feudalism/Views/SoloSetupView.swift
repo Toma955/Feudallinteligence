@@ -21,6 +21,7 @@ private enum SoloMapChoice: Hashable {
 private enum SoloSetupPage {
     case maps
     case resources
+    case persona
 }
 
 private let stepperButtonSize: CGFloat = 40
@@ -31,6 +32,7 @@ struct SoloSetupView: View {
     @EnvironmentObject private var gameState: GameState
     @Binding var isPresented: Bool
     @Binding var showResources: Bool
+    @Binding var showPersona: Bool
     var importTick: Int = 0
     @State private var selected: SoloMapChoice?
     @State private var catalogRevision = 0
@@ -77,6 +79,12 @@ struct SoloSetupView: View {
 
     private var canStart: Bool { preparedMap != nil && loadProgress >= 0.999 }
 
+    private var resolvedPage: SoloSetupPage {
+        if showPersona { return .persona }
+        if showResources { return .resources }
+        return .maps
+    }
+
     var body: some View {
         Group {
             if showRecordings {
@@ -105,11 +113,16 @@ struct SoloSetupView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             loadDefaultsFromFile()
-            page = showResources ? .resources : .maps
+            page = resolvedPage
         }
         .onDisappear { loadToken = UUID() }
         .onChange(of: showResources) { open in
-            page = open ? .resources : .maps
+            if open { showPersona = false }
+            page = resolvedPage
+        }
+        .onChange(of: showPersona) { open in
+            if open { showResources = false }
+            page = resolvedPage
         }
         .onChange(of: importTick) { tick in
             if tick > 0 { importMap() }
@@ -119,14 +132,17 @@ struct SoloSetupView: View {
     private var setupBody: some View {
         VStack(spacing: 12) {
             Group {
-                if page == .maps {
+                switch page {
+                case .maps:
                     HStack(alignment: .top, spacing: 10) {
                         ForEach(MapSizePreset.allCases) { preset in
                             sizeColumn(preset)
                         }
                     }
-                } else {
+                case .resources:
                     resourcesSection
+                case .persona:
+                    personaSection
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -437,6 +453,88 @@ struct SoloSetupView: View {
         .scrollContentBackground(.hidden)
     }
 
+    private var personaSection: some View {
+        let language = gameState.appLanguage
+        let selectedId = gameState.sandboxPersonaLordId
+        let meName: String = {
+            let n = gameState.playerProfileName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return n.isEmpty ? L("solo_persona_me") : n
+        }()
+        return ScrollView(.vertical, showsIndicators: true) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 10)], spacing: 10) {
+                personaCard(
+                    title: meName,
+                    subtitle: L("solo_persona_me"),
+                    icon: PlayerEmblem(rawValue: gameState.playerEmblemId)?.sfSymbolName ?? "person.fill",
+                    colorHex: "2E86AB",
+                    selected: selectedId == nil
+                ) {
+                    gameState.sandboxPersonaLordId = nil
+                }
+                ForEach(AILordProfileStore.shared.profiles) { profile in
+                    personaCard(
+                        title: profile.localizedName(language: language),
+                        subtitle: profile.localizedDescription(language: language),
+                        icon: profile.displayIconName,
+                        colorHex: profile.displayColorHex,
+                        selected: selectedId == profile.id
+                    ) {
+                        gameState.sandboxPersonaLordId = profile.id
+                    }
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.bottom, 12)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .scrollContentBackground(.hidden)
+    }
+
+    private func personaCard(
+        title: String,
+        subtitle: String,
+        icon: String,
+        colorHex: String,
+        selected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(Color(hex: colorHex) ?? .gray)
+                    .frame(width: 32, height: 32)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.95))
+                        .lineLimit(1)
+                    Text(subtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                if selected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color.green)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                selected ? Color.green.opacity(0.18) : Color.white.opacity(0.08),
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(selected ? Color.green.opacity(0.7) : Color.clear, lineWidth: 1.5)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
     private func loadDefaultsFromFile() {
         let def = StartingResourcesLoader.startingResources(for: "solo")
         initialGold = def.gold
@@ -505,6 +603,7 @@ struct SoloSetupView: View {
         guard panel.runModal() == .OK, let url = panel.url,
               let data = MapFileManager.load(from: url) else { return }
         showResources = false
+        showPersona = false
         page = .maps
         let side = MapStorage.folderSide(rows: data.rows, cols: data.cols)
         let name = data.mapName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -602,7 +701,11 @@ private struct EmptyMapThumbnail: View {
 }
 
 #Preview {
-    SoloSetupView(isPresented: .constant(true), showResources: .constant(false))
+    SoloSetupView(
+        isPresented: .constant(true),
+        showResources: .constant(false),
+        showPersona: .constant(false)
+    )
         .environmentObject(GameState())
         .frame(width: 1600, height: 920)
         .background(Color.black.opacity(0.5))

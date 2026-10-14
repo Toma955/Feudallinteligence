@@ -475,7 +475,7 @@ struct PadPreviewView: NSViewRepresentable {
             tile.addChildNode(stoneTile())
         case .zeljezo:
             tile.addChildNode(ironTile())
-        case .voda, .jezero:
+        case .rijeka, .jezero:
             tile.addChildNode(waterTile(sea: false))
         case .more:
             tile.addChildNode(waterTile(sea: true))
